@@ -43,9 +43,9 @@ export class Game {
   readonly stats: Record<string, number> = { knockouts: 0, carsStolen: 0, busted: 0, wasted: 0 };
 
   state: GameState = 'menu';
-  weapon: 'fist' | 'pistol' = 'fist';
-  hasPistol = false;
-  ammo = 0;
+  weapon: 'fist' | 'pistol' = 'pistol'; // the player starts armed
+  hasPistol = true;
+  ammo = 36;
   private fireT = 0;
   money = 250;
   playTime = 0;
@@ -247,8 +247,8 @@ export class Game {
     (d.completed || []).forEach((id) => this.missions.completed.add(id));
     (d.collected || []).forEach((id) => this.missions.collected.add(id));
     Object.assign(this.stats, d.stats || {});
-    this.ammo = d.ammo || 0;
-    this.hasPistol = !!d.hasPistol;
+    this.ammo = d.ammo ?? 36; // saves from before the pistol was standard get a full load
+    this.hasPistol = true;
     this.missions.placePackages();
     const blocked = this.city.collision.pointBlocked(d.x, 0.5, d.z, 0.6);
     if (blocked) this.resetPlayer();
