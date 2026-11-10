@@ -1,0 +1,75 @@
+:root {
+  --accent: #ff4fa0;
+  --accent2: #29d8c8;
+  --panel: rgba(12, 14, 22, 0.62);
+  font-family: 'Segoe UI', 'Yu Gothic UI', 'Meiryo', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#ui { position: fixed; inset: 0; pointer-events: none; user-select: none; }
+.hidden { display: none !important; }
+
+.hud-tr { position: absolute; top: 18px; right: 22px; text-align: right; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8); }
+.money { font-size: 30px; font-weight: 800; color: #8df58a; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.stars { font-size: 26px; letter-spacing: 3px; height: 34px; }
+.stars span { color: rgba(255, 255, 255, 0.22); }
+.stars span.on { color: #ffd23c; text-shadow: 0 0 10px #ffb400; }
+.stars.flash span.on { animation: blink 0.5s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.clock { font-size: 18px; font-weight: 600; opacity: 0.95; }
+.fps { position: absolute; top: 6px; left: 8px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
+
+.hud-bl { position: absolute; left: 22px; bottom: 22px; }
+.minimap { width: 200px; height: 200px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.85); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6); display: block; background: #123; }
+.bar { width: 200px; height: 9px; margin-top: 8px; background: rgba(0, 0, 0, 0.55); border-radius: 5px; overflow: hidden; }
+.bar > div { height: 100%; background: linear-gradient(90deg, #3ddc6e, #9cf07a); transition: width 0.15s; }
+.bar.low > div { background: linear-gradient(90deg, #e33, #f86); }
+.district { margin-top: 6px; font-size: 13px; opacity: 0.9; text-shadow: 0 1px 3px #000; }
+
+.hud-br { position: absolute; right: 26px; bottom: 24px; text-align: right; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8); }
+.speed { font-size: 52px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.speed small { font-size: 16px; font-weight: 600; margin-left: 4px; opacity: 0.8; }
+.carname { font-size: 14px; opacity: 0.85; }
+.hud-br .bar { margin-left: auto; width: 160px; }
+.hud-br .bar > div { background: linear-gradient(90deg, #f5a623, #ffd76a); }
+
+.objective { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: var(--panel); padding: 10px 22px; border-radius: 10px; border-left: 4px solid var(--accent); font-size: 17px; text-align: center; max-width: 60vw; backdrop-filter: blur(4px); }
+.objective .timer { font-size: 22px; font-weight: 800; color: #ffd23c; margin-left: 12px; font-variant-numeric: tabular-nums; }
+.objective .timer.low { color: #ff5a5a; }
+
+.prompt { position: absolute; bottom: 16%; left: 50%; transform: translateX(-50%); background: var(--panel); padding: 8px 18px; border-radius: 8px; font-size: 16px; backdrop-filter: blur(4px); white-space: nowrap; }
+.prompt b { display: inline-block; background: #fff; color: #111; border-radius: 4px; padding: 0 7px; margin-right: 8px; }
+
+.notes { position: absolute; left: 22px; top: 70px; width: 320px; display: flex; flex-direction: column; gap: 6px; }
+.note { background: var(--panel); border-left: 3px solid var(--accent2); padding: 8px 12px; border-radius: 6px; font-size: 14px; animation: slidein 0.25s ease-out; backdrop-filter: blur(4px); }
+.note.warn { border-left-color: #ff5a5a; }
+.note.good { border-left-color: #8df58a; }
+@keyframes slidein { from { transform: translateX(-30px); opacity: 0; } }
+
+.banner { position: absolute; top: 32%; left: 0; right: 0; text-align: center; text-shadow: 0 4px 18px rgba(0, 0, 0, 0.9); animation: pop 0.4s ease-out; }
+.banner h1 { margin: 0; font-size: clamp(40px, 7vw, 86px); font-weight: 900; letter-spacing: 4px; font-style: italic; }
+.banner p { margin: 6px 0 0; font-size: 22px; }
+@keyframes pop { from { transform: scale(1.4); opacity: 0; } }
+
+.overlay { position: absolute; inset: 0; pointer-events: auto; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(20, 10, 40, 0.55), rgba(5, 5, 12, 0.9)); backdrop-filter: blur(3px); }
+.card { width: min(680px, 92vw); max-height: 92vh; overflow: auto; padding: 30px 36px; background: rgba(14, 16, 28, 0.88); border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); text-align: center; }
+.title { font-size: clamp(40px, 7vw, 68px); font-weight: 900; font-style: italic; letter-spacing: 3px; margin: 0; background: linear-gradient(90deg, var(--accent), #ffb347 55%, var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.subtitle { margin: 2px 0 22px; opacity: 0.75; letter-spacing: 4px; font-size: 13px; }
+.btn { display: block; width: 100%; margin: 9px 0; padding: 13px; font-size: 17px; font-weight: 700; color: #fff; background: linear-gradient(90deg, #ff4fa0, #ff7a59); border: 0; border-radius: 10px; cursor: pointer; font-family: inherit; }
+.btn.alt { background: rgba(255, 255, 255, 0.12); }
+.btn:hover { filter: brightness(1.15); }
+.keys { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; margin-top: 18px; text-align: left; font-size: 13.5px; opacity: 0.92; }
+.keys div { display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding: 3px 0; }
+.keys b { color: var(--accent2); font-weight: 700; }
+.fade { position: absolute; inset: 0; background: #000; opacity: 0; transition: opacity 0.6s; }
+.fade.on { opacity: 0.85; }
+@media (max-width: 760px) {
+  .minimap { width: 140px; height: 140px; }
+  .bar { width: 140px; }
+  .speed { font-size: 36px; }
+  .notes { width: 220px; }
+}
+
+.cross { position: absolute; left: 50%; top: 44%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 50%; box-shadow: 0 0 4px #000; }
+.cross::after { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px; background: #fff; border-radius: 50%; }
