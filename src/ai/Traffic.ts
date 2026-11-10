@@ -156,7 +156,7 @@ export class Traffic {
     const r: Route = reuse?.ai ?? this.newRoute();
     const s = this.pickSpawn(initial ? 20 : 110, initial ? 240 : 270, r);
     if (!s) return;
-    const kinds: VehicleKind[] = ['prius', 'prius', 'prius', 'alphard', 'alphard', 'alphard', 'taxi'];
+    const kinds: VehicleKind[] = ['prius', 'prius', 'prius', 'prius', 'alphard', 'alphard', 'alphard', 'taxi', 'taxi', 'ambulance', 'firetruck'];
     const v = reuse ?? this.game.addVehicle(kinds[Math.floor(Math.random() * kinds.length)], s.x, s.z, s.heading);
     v.place(s.x, s.z, s.heading);
     v.ai = r;

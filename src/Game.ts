@@ -188,6 +188,15 @@ export class Game {
       if (alongZ) this.addVehicle(kind, line - side * PARK_OFFSET, along, side > 0 ? 0 : Math.PI);
       else this.addVehicle(kind, along, line + side * PARK_OFFSET, side > 0 ? Math.PI / 2 : -Math.PI / 2);
     }
+    // emergency vehicles: an ambulance outside the hospital, a fire engine one block east of the spawn
+    const specials: [VehicleKind, number, number][] = [
+      ['ambulance', roadCoord(4) - PARK_OFFSET, roadCoord(5) + 24],
+      ['firetruck', roadCoord(7) - PARK_OFFSET - 0.2, roadCoord(6) + 34],
+    ];
+    for (const [kind, x, z] of specials) {
+      for (const v of this.vehicles.filter((o) => Math.abs(o.pos.x - x) < 4 && Math.abs(o.pos.z - z) < 11)) this.removeVehicle(v);
+      this.addVehicle(kind, x, z, 0);
+    }
     // a guaranteed starter car next to the spawn point
     this.addVehicle('prius', roadCoord(6) + PARK_OFFSET, roadCoord(6) + 26, Math.PI, 0xd9dde2);
   }
