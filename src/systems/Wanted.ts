@@ -48,11 +48,21 @@ export class Wanted {
     }
     const police = g.traffic.police;
     // dispatch units up to the wanted level
-    let active = 0;
-    for (const v of police) if (v.driver === 'police') active++;
-    if ((this.dispatchT -= dt) <= 0 && active < this.level && police.length < 8) {
-      this.dispatchT = 2.5;
-      g.traffic.spawnPolice();
+    let active = 0, mcvs = 0;
+    for (const v of police)
+      if (v.driver === 'police') {
+        active++;
+        if (v.kind === 'mcv') mcvs++;
+      }
+    if ((this.dispatchT -= dt) <= 0) {
+      // from ★4 the JGSDF sends a Type 16 MCV (two at ★5) on top of the patrol cars
+      if (this.level >= 4 && mcvs < this.level - 3 && police.length < 10) {
+        this.dispatchT = 2.5;
+        if (g.traffic.spawnPolice('mcv')) g.hud.notify('陸上自衛隊 16式機動戦闘車が出動！', 'warn');
+      } else if (active - mcvs < this.level && police.length < 8) {
+        this.dispatchT = 2.5;
+        g.traffic.spawnPolice();
+      }
     }
 
     let nearest = Infinity, slowNear = false;

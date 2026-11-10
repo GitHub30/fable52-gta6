@@ -118,11 +118,11 @@ export class Traffic {
   }
 
   // ------------------------------------------------------------------ police
-  spawnPolice() {
+  spawnPolice(kind: VehicleKind = 'police') {
     const r = this.newRoute();
     const s = this.pickSpawn(90, 220, r);
     if (!s) return null;
-    const v = this.game.addVehicle('police', s.x, s.z, s.heading);
+    const v = this.game.addVehicle(kind, s.x, s.z, s.heading);
     v.ai = r;
     v.driver = 'police';
     this.police.push(v);
@@ -182,7 +182,7 @@ export class Traffic {
         const v = g.vehicles[k];
         if (!v.ai || v === p.vehicle) continue;
         const far = Math.max(Math.abs(v.pos.x - p.pos.x), Math.abs(v.pos.z - p.pos.z));
-        if (v.kind === 'police') {
+        if (v.kind === 'police' || v.kind === 'mcv') {
           if (v.driver !== 'police' && far > 230) {
             g.removeVehicle(v);
             const pi = this.police.indexOf(v);

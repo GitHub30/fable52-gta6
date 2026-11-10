@@ -1,5 +1,5 @@
-export type SirenKind = 'police' | 'ambulance' | 'firetruck';
-const SIREN_FILES: Record<SirenKind, string> = { police: 'police.m4a', ambulance: 'ambulance.m4a', firetruck: 'fire-engine.m4a' };
+export type SirenKind = 'police' | 'ambulance' | 'firetruck' | 'mcv';
+const SIREN_FILES: Record<SirenKind, string> = { police: 'police.m4a', ambulance: 'ambulance.m4a', firetruck: 'fire-engine.m4a', mcv: 'mcv.m4a' };
 const SIREN_KINDS = Object.keys(SIREN_FILES) as SirenKind[];
 interface Siren {
   buf: AudioBuffer | null;
@@ -214,6 +214,14 @@ export class GameAudio {
     if (v < 0.01) return;
     this.noise(this.now, 1.0, v, 420, 'lowpass');
     this.tone(70, this.now, 0.7, 'sine', v, undefined, 24);
+  }
+  /** Main gun of the 16式: sharp crack over a long low thump. */
+  cannon(dist = 0) {
+    const v = 0.8 * Math.max(0, 1 - dist / 320);
+    if (v < 0.01) return;
+    this.noise(this.now, 0.25, v, 2200, 'bandpass');
+    this.noise(this.now, 0.9, v, 500, 'lowpass');
+    this.tone(110, this.now, 0.6, 'sine', v, undefined, 28);
   }
   rocket() {
     this.noise(this.now, 0.55, 0.22, 1800, 'highpass');

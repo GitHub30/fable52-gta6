@@ -34,6 +34,10 @@ const GUNS = {
   ak47: { interval: 0.1, ped: 40, cop: 34, veh: 6, spread: 0.03, auto: true, shake: 0.08 },
 };
 const ROCKET_SPEED = 46, BLAST_RADIUS = 9;
+const SHELL_SPEED = 85, MCV_RELOAD = 6;
+const shellGeo = new THREE.BoxGeometry(0.2, 0.2, 1.3);
+const shellMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, emissive: 0xffc04a, emissiveIntensity: 1.6 });
+const muzzle = { x: 0, y: 0, z: 0, dx: 0, dz: 0 };
 const rocketGeo = new THREE.BoxGeometry(0.16, 0.16, 0.9);
 const rocketMat = new THREE.MeshStandardMaterial({ color: 0x4b5a34, emissive: 0xff7a2a, emissiveIntensity: 0.6 });
 // weapon models hang from the right hand: the arm's local -Y axis points forward while aiming
@@ -83,7 +87,8 @@ export class Game {
   readonly helis: Helicopter[] = [];
   heli: Helicopter | null = null; // the one being flown
   private nearHeli: Helicopter | null = null;
-  private rockets: { mesh: THREE.Mesh; vx: number; vz: number; life: number }[] = [];
+  /** Rockets and tank shells in flight. `hostile` ones were fired at the player; `owner` is the vehicle that fired. */
+  private rockets: { mesh: THREE.Mesh; vx: number; vy: number; vz: number; life: number; hostile: boolean; owner: Vehicle | null }[] = [];
   private shownProp = '';
   private fireT = 0;
   money = 250;
@@ -433,6 +438,7 @@ export class Game {
           if (act) this.fireRocket();
         } else if (act || (held && GUNS[this.weapon].auto)) this.shoot();
       }
+      if (p.vehicle?.turret && act) this.fireMainGun(p.vehicle, false);
       if (input.wasPressed('KeyM') && this.missions.active) this.missions.fail('ミッションを中止した');
       if (input.wasPressed('KeyH') && p.vehicle) {
         this.audio.horn(0);
@@ -485,6 +491,7 @@ export class Game {
 
     // --- characters
     this.updateHelis(dt, frozen, smokeNow);
+    this.updateMcvs(dt);
     this.updateRockets(dt);
     p.update(dt, input, camFwd, this.city, frozen);
     if (this.heli) {
@@ -518,11 +525,18 @@ export class Game {
     this.updateHeadlight(car);
     // sirens: pursuing patrol cars by distance; the ambulance and fire engine only while the player drives them
     let policeDist = Infinity;
-    for (const v of this.traffic.police) if (v.driver === 'police') policeDist = Math.min(policeDist, Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z));
+    let mcvDist = car && car.kind === 'mcv' && !car.wrecked ? 0 : Infinity;
+    for (const v of this.traffic.police) {
+      if (v.driver !== 'police') continue;
+      const d = Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z);
+      if (v.kind === 'mcv') mcvDist = Math.min(mcvDist, d);
+      else policeDist = Math.min(policeDist, d);
+    }
     const siren = {
       police: policeDist < 160 ? 1 - policeDist / 160 : 0,
       ambulance: car && car.kind === 'ambulance' && !car.wrecked ? 1 : 0,
       firetruck: car && car.kind === 'firetruck' && !car.wrecked ? 1 : 0,
+      mcv: mcvDist < 240 ? 1 - mcvDist / 240 : 0,
     };
     this.audio.update(!!car || !!ride, car ? car.speed : ride ? ride.spin * (16 + ride.airspeed * 0.4) : 0, car ? car.throttle : ride ? ride.spin : 0, siren, this.env.rain);
 
@@ -547,7 +561,7 @@ export class Game {
       else if (car) {
         if (Math.abs(car.speed) < 6) this.prompt = ['E', '降りる'];
       } else if (m.nearStart) this.prompt = ['F', `ミッション開始: ${m.nearStart.name}（報酬 $${m.nearStart.reward}）`];
-      else if (near) this.prompt = ['E', near.driver === 'police' ? 'パトカー（ロック中）' : `${near.spec.name}に乗る${near.driver === 'ai' ? '（強奪）' : ''}`];
+      else if (near) this.prompt = ['E', near.driver === 'police' ? `${near.spec.name}（ロック中）` : `${near.spec.name}に乗る${near.driver === 'ai' ? '（強奪）' : ''}`];
     }
     this.hud.setPrompt(this.prompt ? this.prompt[0] : null, this.prompt ? this.prompt[1] : '');
     this.hud.update({
@@ -601,7 +615,7 @@ export class Game {
   enterVehicle(v: Vehicle) {
     const p = this.player;
     if (v.driver === 'police') {
-      this.hud.notify('パトカーはロックされている', 'warn');
+      this.hud.notify(`${v.spec.name}はロックされている`, 'warn');
       return;
     }
     if (v.driver === 'ai') {
@@ -812,7 +826,7 @@ export class Game {
     } else if (kind === 2) this.hurtPed(target, gun.ped, fx, fz, true);
     else {
       const v = target as Vehicle;
-      v.health = Math.max(0, v.health - gun.veh);
+      v.hurt(gun.veh);
       if (v.driver === 'police') this.wanted.crime(2, 4, 'パトカーを銃撃');
       else if (v.driver === 'ai') {
         this.traffic.panic(v);
@@ -834,33 +848,82 @@ export class Game {
     mesh.position.set(p.pos.x + camFwd.x * 1.2, p.pos.y + 1.4, p.pos.z + camFwd.z * 1.2);
     mesh.rotation.y = p.heading;
     this.scene.add(mesh);
-    this.rockets.push({ mesh, vx: camFwd.x * ROCKET_SPEED, vz: camFwd.z * ROCKET_SPEED, life: 2.6 });
+    this.rockets.push({ mesh, vx: camFwd.x * ROCKET_SPEED, vy: 0, vz: camFwd.z * ROCKET_SPEED, life: 2.6, hostile: false, owner: null });
     this.audio.rocket();
     this.rig.shake = 0.3;
     this.peds.scareAround(p.pos.x, p.pos.z, 20);
   }
 
+  /** 105 mm round from a 16式: a fast shell that flies straight at `aim` (or level, for the player's own shots). */
+  private fireMainGun(v: Vehicle, hostile: boolean, aim?: { x: number; y: number; z: number }) {
+    if (v.gunT > 0 || v.wrecked) return;
+    v.gunT = hostile ? MCV_RELOAD : 2.2;
+    const mz = v.muzzle(muzzle);
+    const mesh = new THREE.Mesh(shellGeo, shellMat);
+    mesh.position.set(mz.x, mz.y, mz.z);
+    mesh.rotation.y = Math.atan2(mz.dx, mz.dz);
+    this.scene.add(mesh);
+    let vy = 0;
+    if (aim) vy = clamp(((aim.y - mz.y) / Math.max(4, Math.hypot(aim.x - mz.x, aim.z - mz.z))) * SHELL_SPEED, -SHELL_SPEED * 0.6, SHELL_SPEED * 0.6);
+    this.rockets.push({ mesh, vx: mz.dx * SHELL_SPEED, vy, vz: mz.dz * SHELL_SPEED, life: 3, hostile, owner: v });
+    // muzzle blast and recoil
+    this.effects.sparks(mz.x, mz.y, mz.z, 26);
+    for (let k = 0; k < 6; k++) this.effects.smoke(mz.x + mz.dx * k * 0.5, mz.y, mz.z + mz.dz * k * 0.5, 0.5);
+    v.vx -= mz.dx * 2.2;
+    v.vz -= mz.dz * 2.2;
+    const dist = Math.hypot(v.pos.x - this.player.pos.x, v.pos.z - this.player.pos.z);
+    this.audio.cannon(dist);
+    this.rig.shake = Math.max(this.rig.shake, clamp(0.9 - dist / 60, 0, 0.9));
+    this.peds.scareAround(v.pos.x, v.pos.z, 40);
+  }
+
+  /** Turret control: the player's follows the camera; pursuing crews track the suspect and fire when they have a clear shot. */
+  private updateMcvs(dt: number) {
+    const p = this.player;
+    for (const v of this.vehicles) {
+      if (!v.turret) continue;
+      v.gunT = Math.max(0, v.gunT - dt);
+      if (v.driver === 'player') {
+        this.rig.forward(camFwd);
+        v.aimTurret(Math.atan2(camFwd.x, camFwd.z), dt);
+      } else if (v.driver === 'police' && !v.wrecked && !p.dead) {
+        const dx = p.pos.x - v.pos.x, dz = p.pos.z - v.pos.z, d = Math.hypot(dx, dz);
+        const err = v.aimTurret(Math.atan2(dx, dz), dt);
+        if (v.gunT > 0 || err > 0.05 || d < 16 || d > 150) continue;
+        if (!p.inHeli && !this.traffic.lineOfSight(v.pos.x, v.pos.z, p.pos.x, p.pos.z)) {
+          v.gunT = 0.5; // look again shortly
+          continue;
+        }
+        // the crew aims where the suspect is now, so a moving target can get clear
+        this.fireMainGun(v, true, { x: p.pos.x, y: p.pos.y + 1, z: p.pos.z });
+      } else v.aimTurret(v.heading, dt); // stowed forward
+    }
+  }
+
   private updateRockets(dt: number) {
+    const p = this.player;
     for (let k = this.rockets.length - 1; k >= 0; k--) {
       const r = this.rockets[k], m = r.mesh.position;
       m.x += r.vx * dt;
+      m.y += r.vy * dt;
       m.z += r.vz * dt;
       r.life -= dt;
       this.effects.smoke(m.x, m.y, m.z, 0.3);
       let hit = r.life <= 0 || this.city.collision.pointBlocked(m.x, m.y, m.z) || m.y < this.city.groundHeight(m.x, m.z) + 0.2 || Math.abs(m.x) > BOUND.x + 60 || Math.abs(m.z) > BOUND.z + 60;
-      if (!hit) for (const v of this.vehicles) if ((v.pos.x - m.x) ** 2 + (v.pos.z - m.z) ** 2 < (v.radius + 1.1) ** 2) { hit = true; break; }
+      if (!hit) for (const v of this.vehicles) if (v !== r.owner && (v.pos.x - m.x) ** 2 + (v.pos.z - m.z) ** 2 < (v.radius + 1.1) ** 2 && Math.abs(m.y - v.pos.y - 1.5) < 3.5) { hit = true; break; }
+      if (!hit && r.hostile && !p.vehicle && (p.pos.x - m.x) ** 2 + (p.pos.z - m.z) ** 2 < 2.2 && Math.abs(m.y - p.pos.y - 1) < 2.5) hit = true;
       if (!hit) for (const q of this.peds.list) if (q.state !== 'down' && (q.pos.x - m.x) ** 2 + (q.pos.z - m.z) ** 2 < 1) { hit = true; break; }
       if (!hit) for (const o of this.officers.list) if (!o.down && (o.pos.x - m.x) ** 2 + (o.pos.z - m.z) ** 2 < 1) { hit = true; break; }
-      if (!hit) for (const h of this.helis) if (!h.destroyed && h !== this.heli && h.pos.distanceToSquared(m) < 12) { hit = true; break; }
+      if (!hit) for (const h of this.helis) if (!h.destroyed && (h !== this.heli || r.hostile) && h.pos.distanceToSquared(m) < 12) { hit = true; break; }
       if (!hit) continue;
       this.scene.remove(r.mesh);
       this.rockets.splice(k, 1);
-      this.explode(m.x, m.y, m.z);
+      this.explode(m.x, m.y, m.z, !r.hostile);
     }
   }
 
   /** Blast: wrecks and throws vehicles, knocks people down, hurts the player if close. */
-  explode(x: number, y: number, z: number) {
+  explode(x: number, y: number, z: number, byPlayer = true) {
     const p = this.player, R = BLAST_RADIUS;
     const dist = Math.hypot(p.pos.x - x, p.pos.z - z);
     this.effects.explosion(x, y, z);
@@ -870,7 +933,7 @@ export class Game {
       const dx = v.pos.x - x, dz = v.pos.z - z, d = Math.hypot(dx, dz);
       if (d >= R) continue;
       const f = 1 - d / R, inv = d > 0.01 ? 1 / d : 0;
-      v.health = Math.max(0, v.health - 140 * f);
+      v.hurt(140 * f);
       v.vx += dx * inv * 16 * f;
       v.vz += dz * inv * 16 * f;
       if (v.driver === 'ai') {
@@ -908,6 +971,7 @@ export class Game {
     }
     this.peds.scareAround(x, z, 45);
     this.stats.knockouts += knocked;
+    if (!byPlayer) return; // army shells are not the player's crime
     if (cops) this.onOfficerDown('警官を爆破');
     else this.wanted.crime(knocked ? 3 : 2, 5, '爆破');
   }

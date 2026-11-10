@@ -1,14 +1,15 @@
 import * as THREE from 'three';
-import { mergeBoxes, carPaintMaterial, BoxPart } from '../core/geo';
+import { mergeBoxes, carPaintMaterial, vertexColorMaterial, BoxPart } from '../core/geo';
 import { City } from '../world/City';
-import { BOUND, clamp, damp } from '../config';
+import { BOUND, clamp, damp, angleDiff } from '../config';
 import { buildLivery } from './Livery';
 import { patrolCarParts, patrolCarLivery, ambulanceParts, ambulanceLivery, fireTruckParts, fireTruckLivery } from './Emergency';
+import { mcvHullParts, mcvTurretParts, mcvLivery, MCV_TURRET_AT, MCV_MUZZLE } from './Mcv';
 
-export type VehicleKind = 'prius' | 'alphard' | 'taxi' | 'police' | 'ambulance' | 'firetruck';
+export type VehicleKind = 'prius' | 'alphard' | 'taxi' | 'police' | 'ambulance' | 'firetruck' | 'mcv';
 export interface VehicleSpec {
   name: string;
-  shape: 'prius' | 'alphard' | 'patrol' | 'ambulance' | 'firetruck';
+  shape: 'prius' | 'alphard' | 'patrol' | 'ambulance' | 'firetruck' | 'mcv';
   wheel: number; // tyre diameter
   len: number;
   wid: number;
@@ -16,6 +17,8 @@ export interface VehicleSpec {
   accel: number;
   grip: number;
   colors: number[];
+  /** Divides incoming damage (armoured vehicles). */
+  armor?: number;
 }
 const PRIUS_COLORS = [0xd9dde2, 0xf4f4f2, 0x1b1c1f, 0x2a4f8f, 0x9a1c26, 0x7d868c, 0xe6c94a];
 export const SPECS: Record<VehicleKind, VehicleSpec> = {
@@ -24,6 +27,7 @@ export const SPECS: Record<VehicleKind, VehicleSpec> = {
   taxi: { name: 'プリウス タクシー', shape: 'prius', wheel: 0.68, len: 4.6, wid: 1.8, maxSpeed: 38, accel: 10, grip: 7.4, colors: [0xf7c21a] },
   police: { name: 'パトカー', shape: 'patrol', wheel: 0.68, len: 4.85, wid: 1.8, maxSpeed: 46, accel: 13, grip: 8, colors: [0xf2f2f2] },
   ambulance: { name: '救急車', shape: 'ambulance', wheel: 0.78, len: 5.6, wid: 1.95, maxSpeed: 38, accel: 9, grip: 6.8, colors: [0xf4f4f1] },
+  mcv: { name: '16式機動戦闘車', shape: 'mcv', wheel: 1.24, len: 8.0, wid: 2.7, maxSpeed: 29, accel: 7.5, grip: 6.4, colors: [0x4c5439], armor: 6 },
   firetruck: { name: '消防車', shape: 'firetruck', wheel: 1.02, len: 7.6, wid: 2.35, maxSpeed: 31, accel: 6.2, grip: 6, colors: [0xd3191c] },
 };
 
@@ -104,8 +108,8 @@ function vehicleGeometry(kind: VehicleKind, color: number) {
   if (g) return g;
   const s = SPECS[kind];
   const { len: L, wid: W } = s;
-  const parts: BoxPart[] = [];
-  const top =
+  const parts: BoxPart[] = s.shape === 'mcv' ? mcvHullParts(W, L, s.wheel) : [];
+  const top = s.shape === 'mcv' ? 0 :
     s.shape === 'prius' ? priusParts(parts, W, L, color)
     : s.shape === 'patrol' ? patrolCarParts(parts, W, L, s.wheel)
     : s.shape === 'alphard' ? alphardParts(parts, W, L, color)
@@ -113,7 +117,7 @@ function vehicleGeometry(kind: VehicleKind, color: number) {
     : fireTruckParts(parts, W, L);
   // wheels: a tyre cylinder with a slightly wider hub so the rim shows from the side
   const d = s.wheel;
-  for (const sx of [-1, 1])
+  if (s.shape !== 'mcv') for (const sx of [-1, 1])
     for (const sz of [-1, 1]) {
       const at: [number, number, number] = [sx * (W / 2 - 0.1), d / 2, sz * L * 0.3];
       parts.push({ size: [0.26, d, d], pos: at, color: 0x0e0e10, cyl: true });
@@ -136,12 +140,14 @@ function vehicleLivery(kind: VehicleKind): THREE.Mesh | null {
   let m = liveryCache.get(kind);
   if (m === undefined) {
     const { len: L, wid: W } = SPECS[kind];
-    const l = kind === 'police' ? patrolCarLivery(W, L) : kind === 'ambulance' ? ambulanceLivery(W, L) : kind === 'firetruck' ? fireTruckLivery(W, L) : null;
+    const l = kind === 'mcv' ? mcvLivery(W, L) : kind === 'police' ? patrolCarLivery(W, L) : kind === 'ambulance' ? ambulanceLivery(W, L) : kind === 'firetruck' ? fireTruckLivery(W, L) : null;
     m = l ? buildLivery(l) : null;
     liveryCache.set(kind, m);
   }
   return m ? m.clone() : null;
 }
+
+let turretGeo: THREE.BufferGeometry | null = null;
 
 export type Driver = 'none' | 'player' | 'ai' | 'police';
 const push = { x: 0, z: 0 };
@@ -166,14 +172,24 @@ export class Vehicle {
   roll = 0;
   pitch = 0;
   readonly radius: number;
+  /** Traversable gun turret (16式 only); its rotation.y is the traverse relative to the hull. */
+  readonly turret: THREE.Mesh | null = null;
+  gunT = 0; // seconds until the main gun is reloaded
 
   constructor(readonly kind: VehicleKind, color?: number) {
     this.spec = SPECS[kind];
     const c = color ?? this.spec.colors[Math.floor(Math.random() * this.spec.colors.length)];
-    this.mesh = new THREE.Mesh(vehicleGeometry(kind, c), carPaintMaterial);
+    this.mesh = new THREE.Mesh(vehicleGeometry(kind, c), kind === 'mcv' ? vertexColorMaterial : carPaintMaterial);
     this.mesh.castShadow = true;
     const livery = vehicleLivery(kind);
     if (livery) this.mesh.add(livery);
+    if (kind === 'mcv') {
+      turretGeo ??= mergeBoxes(mcvTurretParts());
+      this.turret = new THREE.Mesh(turretGeo, vertexColorMaterial);
+      this.turret.castShadow = true;
+      this.turret.position.set(...MCV_TURRET_AT);
+      this.mesh.add(this.turret);
+    }
     this.mesh.rotation.order = 'YXZ';
     this.radius = this.spec.wid * 0.5 + 0.12;
   }
@@ -285,7 +301,30 @@ export class Vehicle {
   }
 
   damage(impact: number) {
-    if (impact > 5) this.health = Math.max(0, this.health - (impact - 5) * 2.2);
+    if (impact > 5) this.hurt((impact - 5) * 2.2);
+  }
+  /** Lose health, scaled down by armour. */
+  hurt(amount: number) {
+    this.health = Math.max(0, this.health - amount / (this.spec.armor ?? 1));
+  }
+  /** Turn the turret towards a world heading, at a limited traverse rate. Returns the remaining error in radians. */
+  aimTurret(worldYaw: number, dt: number) {
+    const t = this.turret;
+    if (!t) return 0;
+    const diff = angleDiff(worldYaw - this.heading, t.rotation.y);
+    t.rotation.y += clamp(diff, -1.4 * dt, 1.4 * dt);
+    return Math.abs(diff);
+  }
+  /** Muzzle position and firing direction of the main gun (pitch and roll are ignored). */
+  muzzle(out: { x: number; y: number; z: number; dx: number; dz: number }) {
+    const a = this.heading + (this.turret?.rotation.y ?? 0);
+    const tx = this.pos.x + Math.sin(this.heading) * MCV_TURRET_AT[2], tz = this.pos.z + Math.cos(this.heading) * MCV_TURRET_AT[2];
+    out.dx = Math.sin(a);
+    out.dz = Math.cos(a);
+    out.x = tx + out.dx * MCV_MUZZLE.reach;
+    out.z = tz + out.dz * MCV_MUZZLE.reach;
+    out.y = this.pos.y + MCV_TURRET_AT[1] + MCV_MUZZLE.height;
+    return out;
   }
 }
 

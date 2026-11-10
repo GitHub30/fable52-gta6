@@ -108,6 +108,23 @@ export function roundel(): Draw {
   };
 }
 
+/** Five-petal cherry blossom, the JGSDF mark painted beside the registration number. */
+export function sakura(color: string): Draw {
+  return (ctx, w, h) => {
+    const r = Math.min(w, h) / 2;
+    ctx.fillStyle = color;
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2 - Math.PI / 2;
+      ctx.beginPath();
+      ctx.arc(w / 2 + Math.cos(a) * r * 0.5, h / 2 + Math.sin(a) * r * 0.5, r * 0.36, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  };
+}
+
 const AXES: Record<Face, { n: [number, number, number]; r: [number, number, number] }> = {
   // r = up x n: the viewer's right-hand direction when facing the surface from outside
   '+x': { n: [1, 0, 0], r: [0, 0, -1] },

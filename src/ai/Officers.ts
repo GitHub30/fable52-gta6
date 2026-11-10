@@ -89,7 +89,7 @@ export class Officers {
       if (level >= 2 && playerSpeed < 6 && !pl.dead)
         for (const v of g.traffic.police) {
           if (this.list.length >= MAX_OFFICERS) break;
-          if (v.driver !== 'police' || Math.abs(v.speed) > 2) continue;
+          if (v.driver !== 'police' || v.kind === 'mcv' || Math.abs(v.speed) > 2) continue; // the 16式 crew stays buttoned up
           if (Math.hypot(v.pos.x - pl.pos.x, v.pos.z - pl.pos.z) > 18) continue;
           v.driver = 'none'; // the empty car stays where it stopped (and can be stolen)
           v.throttle = 0;
