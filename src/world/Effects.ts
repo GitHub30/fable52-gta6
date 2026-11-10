@@ -75,6 +75,18 @@ export class Effects {
     for (let k = 0; k < 16; k++)
       this.emit(x + r() * 3, y + 0.5, z + r() * 3, r() * 3, 2 + Math.random() * 4, r() * 3, 1.8 + Math.random() * 1.2, 2.4, 0.16, 0.16, 0.16, -0.4, 3.5);
   }
+  /** Flames licking up from a burning wreck. */
+  fire(x: number, y: number, z: number, spread = 1) {
+    const r = () => (Math.random() - 0.5) * spread;
+    this.emit(x + r(), y, z + r(), r(), 2.5 + Math.random() * 2, r(), 0.35 + Math.random() * 0.35, 0.7 + Math.random() * 0.5, 4, 1.2 + Math.random(), 0.25, -2.5, 1.2);
+  }
+  /** Burning debris thrown out of an explosion. */
+  debris(x: number, y: number, z: number, n = 18) {
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * Math.PI * 2, s = 6 + Math.random() * 12;
+      this.emit(x, y, z, Math.cos(a) * s, 6 + Math.random() * 10, Math.sin(a) * s, 0.9 + Math.random() * 0.8, 0.28, 3.2, 1.3, 0.3, 16, 0);
+    }
+  }
   dust(x: number, z: number, y = 0) {
     this.emit(x, y + 0.2, z, (Math.random() - 0.5) * 1.5, 0.6, (Math.random() - 0.5) * 1.5, 0.8, 0.45, 0.75, 0.72, 0.66, 0, 1.5);
   }

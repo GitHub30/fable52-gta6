@@ -84,4 +84,6 @@ export function setModelDetail(d: ModelDetail) {
 }
 
 export const vertexColorMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.05 });
+/** Burnt-out wrecks: the vertex colours are multiplied down to soot. */
+export const wreckMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, color: 0x2b2826, roughness: 1, metalness: 0 });
 export const carPaintMaterial = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.45, clearcoat: 0, clearcoatRoughness: 0.08 });

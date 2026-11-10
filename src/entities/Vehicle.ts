@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeBoxes, carPaintMaterial, vertexColorMaterial, BoxPart } from '../core/geo';
+import { mergeBoxes, carPaintMaterial, vertexColorMaterial, wreckMaterial, BoxPart } from '../core/geo';
 import { City } from '../world/City';
 import { BOUND, clamp, damp, angleDiff } from '../config';
 import { buildLivery } from './Livery';
@@ -148,6 +148,7 @@ function vehicleLivery(kind: VehicleKind): THREE.Mesh | null {
 }
 
 let turretGeo: THREE.BufferGeometry | null = null;
+const HOP = 0.75; // seconds a blown-up car spends in the air
 
 export type Driver = 'none' | 'player' | 'ai' | 'police';
 const push = { x: 0, z: 0 };
@@ -175,6 +176,12 @@ export class Vehicle {
   /** Traversable gun turret (16式 only); its rotation.y is the traverse relative to the hull. */
   readonly turret: THREE.Mesh | null = null;
   gunT = 0; // seconds until the main gun is reloaded
+  /** Seconds left before a wrecked car blows up; negative while the fuse is not lit. */
+  fuse = -1;
+  exploded = false;
+  burnT = 0; // seconds the wreck keeps burning
+  private hopT = 0;
+  private hopSpin = 0;
 
   constructor(readonly kind: VehicleKind, color?: number) {
     this.spec = SPECS[kind];
@@ -302,6 +309,47 @@ export class Vehicle {
 
   damage(impact: number) {
     if (impact > 5) this.hurt((impact - 5) * 2.2);
+  }
+  /** Blown up: the shell turns to soot, is thrown into the air and burns for a while. */
+  blowUp() {
+    this.exploded = true;
+    this.health = 0;
+    this.fuse = -1;
+    this.burnT = 14;
+    this.hopT = HOP;
+    this.hopSpin = (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.35);
+    this.driver = 'none';
+    this.throttle = this.steer = 0;
+    this.mesh.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m === this.mesh || m === this.turret) m.material = wreckMaterial;
+      else m.visible = false; // lettering burns off
+    });
+  }
+  /** Back to factory condition (traffic reuses abandoned cars). */
+  restore() {
+    this.health = 100;
+    this.fuse = -1;
+    this.burnT = this.hopT = 0;
+    if (!this.exploded) return;
+    this.exploded = false;
+    const paint = this.kind === 'mcv' ? vertexColorMaterial : carPaintMaterial;
+    this.mesh.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m === this.mesh || m === this.turret) m.material = paint;
+      else m.visible = true;
+    });
+  }
+  /** The blast tosses the wreck up and lets it drop back, rocking as it lands. */
+  animateWreck(dt: number) {
+    if (this.hopT <= 0) return;
+    this.hopT = Math.max(0, this.hopT - dt);
+    const t = 1 - this.hopT / HOP, arc = Math.sin(t * Math.PI);
+    this.sync();
+    this.mesh.position.y += arc * 1.5;
+    this.mesh.rotation.z += arc * this.hopSpin;
+    this.mesh.rotation.x += arc * 0.18;
+    if (this.turret) this.turret.rotation.y += dt * 2.5 * (1 - t);
   }
   /** Lose health, scaled down by armour. */
   hurt(amount: number) {

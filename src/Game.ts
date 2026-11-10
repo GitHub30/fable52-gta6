@@ -34,6 +34,7 @@ const GUNS = {
   ak47: { interval: 0.1, ped: 40, cop: 34, veh: 6, spread: 0.03, auto: true, shake: 0.08 },
 };
 const ROCKET_SPEED = 46, BLAST_RADIUS = 9;
+const FUSE = 0.6; // seconds between a car reaching zero health and blowing up
 const SHELL_SPEED = 85, MCV_RELOAD = 6;
 const shellGeo = new THREE.BoxGeometry(0.2, 0.2, 1.3);
 const shellMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, emissive: 0xffc04a, emissiveIntensity: 1.6 });
@@ -108,6 +109,7 @@ export class Game {
   private autosaveT = 60;
   private smokeT = 0;
   private headlight = new THREE.SpotLight(0xfff1d0, 0, 70, 0.5, 0.6, 1.2);
+  private blastLight = new THREE.PointLight(0xff9a3c, 0, 60, 1.6);
   readonly gfx: Graphics;
   private lowFpsT = 0;
   private cssW = 0;
@@ -131,7 +133,7 @@ export class Game {
     this.gfx = new Graphics(this.renderer, this.scene, this.camera, this.env, this.city);
     this.hud.graphics = { level: () => this.gfx.level, set: (l) => this.gfx.apply(l) };
     this.rig.groundAt = (x, z) => this.city.groundHeight(x, z);
-    this.scene.add(this.city.group, this.player.group, this.headlight, this.headlight.target);
+    this.scene.add(this.city.group, this.player.group, this.headlight, this.headlight.target, this.blastLight);
     this.player.onStep = () => this.audio.step();
     this.player.onJump = () => this.audio.jump();
 
@@ -464,6 +466,7 @@ export class Game {
     this.smokeT -= dt;
     const smokeNow = this.smokeT <= 0;
     if (smokeNow) this.smokeT = 0.08;
+    this.blastLight.intensity *= Math.exp(-7 * dt);
     for (const v of this.vehicles) {
       const dx = Math.abs(v.pos.x - p.pos.x), dz = Math.abs(v.pos.z - p.pos.z);
       v.mesh.visible = dx < 340 && dz < 340;
@@ -479,7 +482,19 @@ export class Game {
         }
         if (v.wrecked && v.driver === 'ai') v.driver = 'none';
       }
-      if (smokeNow && v.health < 40 && dx < 120 && dz < 120)
+      // a car at zero health catches fire and blows up a moment later; the wreck keeps burning
+      if (v.wrecked && !v.exploded) {
+        if (v.fuse < 0) v.fuse = FUSE;
+        this.effects.fire(v.pos.x, v.pos.y + 0.9, v.pos.z, 1.6);
+        if ((v.fuse -= dt) <= 0) this.blowUpVehicle(v);
+      } else if (v.exploded) {
+        v.animateWreck(dt);
+        if (v.burnT > 0 && (v.burnT -= dt) > 0 && dx < 160 && dz < 160) {
+          if (Math.random() < Math.min(1, v.burnT / 5)) this.effects.fire(v.pos.x, v.pos.y + 0.8, v.pos.z, v.spec.len * 0.4);
+          if (smokeNow) this.effects.smoke(v.pos.x, v.pos.y + 1.8, v.pos.z, 1);
+        }
+      }
+      if (smokeNow && v.health < 40 && !v.exploded && dx < 120 && dz < 120)
         this.effects.smoke(v.pos.x + Math.sin(v.heading) * 1.6, v.pos.y + 1, v.pos.z + Math.cos(v.heading) * 1.6, 1 - v.health / 40);
     }
 
@@ -555,7 +570,7 @@ export class Game {
       else if (car) {
         if (Math.abs(car.speed) < 6) this.prompt = ['E', '降りる'];
       } else if (m.nearStart) this.prompt = ['F', `ミッション開始: ${m.nearStart.name}（報酬 $${m.nearStart.reward}）`];
-      else if (near) this.prompt = ['E', near.driver === 'police' ? `${near.spec.name}（ロック中）` : `${near.spec.name}に乗る${near.driver === 'ai' ? '（強奪）' : ''}`];
+      else if (near) this.prompt = ['E', near.exploded ? `${near.spec.name}（大破）` : near.driver === 'police' ? `${near.spec.name}（ロック中）` : `${near.spec.name}に乗る${near.driver === 'ai' ? '（強奪）' : ''}`];
     }
     this.hud.setPrompt(this.prompt ? this.prompt[0] : null, this.prompt ? this.prompt[1] : '');
     this.hud.update({
@@ -608,6 +623,10 @@ export class Game {
 
   enterVehicle(v: Vehicle) {
     const p = this.player;
+    if (v.exploded) {
+      this.hud.notify('この車は大破している', 'warn');
+      return;
+    }
     if (v.driver === 'police') {
       this.hud.notify(`${v.spec.name}はロックされている`, 'warn');
       return;
@@ -914,6 +933,19 @@ export class Game {
       this.rockets.splice(k, 1);
       this.explode(m.x, m.y, m.z, !r.hostile);
     }
+  }
+
+  /** A wrecked car goes up: fireball, debris, a flash of light, and death for whoever is still inside. */
+  private blowUpVehicle(v: Vehicle) {
+    const mine = v === this.player.vehicle;
+    v.blowUp();
+    const y = v.pos.y + 1;
+    this.effects.debris(v.pos.x, y, v.pos.z);
+    for (let k = 0; k < 10; k++) this.effects.fire(v.pos.x, y, v.pos.z, v.spec.len * 0.6);
+    this.blastLight.position.set(v.pos.x, y + 1.5, v.pos.z);
+    this.blastLight.intensity = 900;
+    this.explode(v.pos.x, y, v.pos.z, false);
+    if (mine) this.damagePlayer(1000); // nobody walks away from the driver's seat
   }
 
   /** Blast: wrecks and throws vehicles, knocks people down, hurts the player if close. */

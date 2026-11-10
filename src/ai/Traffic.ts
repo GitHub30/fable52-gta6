@@ -110,7 +110,7 @@ export class Traffic {
     v.settle(this.game.city);
     v.ai = r;
     v.driver = 'ai';
-    v.health = 100;
+    v.restore();
     r.panicT = r.blockedT = r.ignoreT = 0;
     const sp = r.cruise * 0.7;
     v.vx = Math.sin(s.heading) * sp;
