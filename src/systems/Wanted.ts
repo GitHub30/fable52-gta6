@@ -71,7 +71,7 @@ export class Wanted {
 
     // busted: boxed in by a patrol car while (nearly) stationary
     const mySpeed = p.vehicle ? Math.abs(p.vehicle.speed) : p.speed;
-    if (slowNear && mySpeed < 2.2 && !p.dead) {
+    if (slowNear && mySpeed < 2.2 && !p.dead && !p.inHeli) {
       this.bustT += dt;
       if (this.bustT > 2.6) {
         this.bustT = 0;

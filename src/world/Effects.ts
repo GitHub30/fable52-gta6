@@ -68,6 +68,13 @@ export class Effects {
     for (let k = 0; k < n; k++)
       this.emit(x, y, z, (Math.random() - 0.5) * 4, Math.random() * 5, (Math.random() - 0.5) * 4, 0.7 + Math.random() * 0.5, 0.2, r, g, b, 5, 0);
   }
+  explosion(x: number, y: number, z: number) {
+    const r = () => Math.random() - 0.5;
+    for (let k = 0; k < 46; k++)
+      this.emit(x, y, z, r() * 20, Math.random() * 12 + 2, r() * 20, 0.45 + Math.random() * 0.6, 1.2 + Math.random() * 1.4, 4, 1.4 + Math.random() * 1.4, 0.3, 10, 2.5);
+    for (let k = 0; k < 16; k++)
+      this.emit(x + r() * 3, y + 0.5, z + r() * 3, r() * 3, 2 + Math.random() * 4, r() * 3, 1.8 + Math.random() * 1.2, 2.4, 0.16, 0.16, 0.16, -0.4, 3.5);
+  }
   dust(x: number, z: number) {
     this.emit(x, 0.2, z, (Math.random() - 0.5) * 1.5, 0.6, (Math.random() - 0.5) * 1.5, 0.8, 0.45, 0.75, 0.72, 0.66, 0, 1.5);
   }

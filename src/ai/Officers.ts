@@ -126,7 +126,7 @@ export class Officers {
         const want = Math.atan2(dx, dz);
         o.heading += angleDiff(want, o.heading) * (1 - Math.exp(-10 * dt));
         const sight = d < 26 && g.traffic.lineOfSight(o.pos.x, o.pos.z, pl.pos.x, pl.pos.z);
-        if (level >= 3 && sight && d < 20 && d > 2.2) {
+        if (level >= 3 && sight && d < 20 && d > 2.2 && pl.pos.y < 25) {
           // hold position and fire
           if ((o.shootT -= dt) <= 0) {
             o.shootT = rand(1.0, 1.7);
@@ -137,6 +137,7 @@ export class Officers {
             g.audio.shot(d);
             if (hit) {
               if (pl.vehicle) pl.vehicle.health = Math.max(0, pl.vehicle.health - 5);
+              else if (g.heli) g.heli.health = Math.max(0, g.heli.health - 4);
               else g.damagePlayer(9);
             }
           }
@@ -147,7 +148,7 @@ export class Officers {
           g.city.collision.resolveCircle(o.pos, 0.38, 0.3, push);
         }
         // arrest at arm's length
-        if (d < 1.8 && !pl.vehicle && pl.speed < 2.5) {
+        if (d < 1.8 && !pl.vehicle && !pl.inHeli && pl.speed < 2.5) {
           o.arrestT += dt;
           if (o.arrestT > 1.3) { o.arrestT = 0; g.busted(); }
         } else o.arrestT = Math.max(0, o.arrestT - dt);

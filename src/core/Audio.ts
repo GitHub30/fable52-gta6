@@ -185,6 +185,16 @@ export class GameAudio {
     this.noise(this.now, 0.14, v, 1400, 'bandpass');
     this.tone(160, this.now, 0.1, 'square', v * 0.5, undefined, 45);
   }
+  boom(dist = 0) {
+    const v = 0.7 * Math.max(0, 1 - dist / 260);
+    if (v < 0.01) return;
+    this.noise(this.now, 1.0, v, 420, 'lowpass');
+    this.tone(70, this.now, 0.7, 'sine', v, undefined, 24);
+  }
+  rocket() {
+    this.noise(this.now, 0.55, 0.22, 1800, 'highpass');
+    this.tone(220, this.now, 0.4, 'sawtooth', 0.08, undefined, 90);
+  }
   door() {
     this.noise(this.now, 0.08, 0.14, 300, 'lowpass');
   }

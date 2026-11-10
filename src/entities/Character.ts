@@ -36,6 +36,9 @@ export class Character {
   private legR: THREE.Mesh;
   private phase = Math.random() * 6;
   punchT = 0;
+  /** Right arm held forward (aiming a weapon). */
+  aim = false;
+  private prop: THREE.Mesh | null = null;
 
   constructor(o: Outfit) {
     const body = new THREE.Mesh(
@@ -84,10 +87,19 @@ export class Character {
     this.legR.rotation.x = -s * amp;
     this.armL.rotation.x = -s * amp * 0.8;
     this.armR.rotation.x = s * amp * 0.8;
+    if (this.aim) this.armR.rotation.x = -1.45;
     if (this.punchT > 0) {
       this.punchT -= dt;
       this.armR.rotation.x = -1.7 * Math.sin(Math.min(1, this.punchT / 0.3) * Math.PI);
     }
+  }
+
+  /** Attach a weapon model to the right hand (null = empty hands). */
+  setProp(mesh: THREE.Mesh | null) {
+    if (this.prop) this.armR.remove(this.prop);
+    this.prop = mesh;
+    if (mesh) this.armR.add(mesh);
+    this.aim = !!mesh;
   }
 
   /** Lying on the ground (knocked out). */

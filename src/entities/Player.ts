@@ -17,6 +17,7 @@ export class Player {
   health = 100;
   vehicle: Vehicle | null = null;
   dead = false;
+  inHeli = false; // position is driven by the helicopter while true
   stepTimer = 0;
   onStep: () => void = () => {};
   onJump: () => void = () => {};
@@ -26,6 +27,7 @@ export class Player {
   }
 
   update(dt: number, input: Input, camFwd: { x: number; z: number }, city: City, frozen: boolean) {
+    if (this.inHeli) return;
     if (this.vehicle) {
       this.pos.copy(this.vehicle.pos);
       this.heading = this.vehicle.heading;
@@ -90,7 +92,7 @@ export class Player {
   syncMesh() {
     this.group.position.copy(this.pos);
     this.group.rotation.y = this.heading;
-    this.group.visible = !this.vehicle;
+    this.group.visible = !this.vehicle && !this.inHeli;
   }
 
   get speed() {

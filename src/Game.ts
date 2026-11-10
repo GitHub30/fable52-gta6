@@ -7,6 +7,8 @@ import { Environment, WEATHER_LABEL, Weather } from './world/Environment';
 import { Effects } from './world/Effects';
 import { Player } from './entities/Player';
 import { Vehicle, VehicleKind, collideVehicles } from './entities/Vehicle';
+import { Helicopter } from './entities/Helicopter';
+import { mergeBoxes, vertexColorMaterial } from './core/geo';
 import { Traffic } from './ai/Traffic';
 import { Pedestrians, Ped } from './ai/Pedestrians';
 import { Officers } from './ai/Officers';
@@ -14,13 +16,44 @@ import { Wanted } from './systems/Wanted';
 import { Missions } from './systems/Missions';
 import { Save } from './systems/Save';
 import { Hud, Blip } from './ui/Hud';
-import { N, BLOCK, PITCH, PARK_OFFSET, roadCoord, mulberry32, rand } from './config';
+import { N, BLOCK, PITCH, PARK_OFFSET, WORLD_BOUND, roadCoord, mulberry32, rand, clamp } from './config';
 
 export type GameState = 'menu' | 'playing' | 'paused';
 const camFwd = { x: 0, z: 0 };
 const tmp = { x: 0, z: 0 };
 const WEATHER_ORDER: Weather[] = ['clear', 'cloudy', 'rain', 'fog'];
 const QUALITY_STEPS = [1.5, 1.25, 1, 0.8];
+
+export type Weapon = 'fist' | 'pistol' | 'ak47' | 'rocket';
+const WEAPON_KEYS: Weapon[] = ['fist', 'pistol', 'ak47', 'rocket'];
+const WEAPON_NAME: Record<Weapon, string> = { fist: '素手', pistol: 'ピストル', ak47: 'AK-47', rocket: 'ロケットランチャー' };
+/** Bullet weapons: seconds between shots, damage to pedestrians / officers / vehicles, spread (radians), full-auto. */
+const GUNS = {
+  pistol: { interval: 0.3, ped: 60, cop: 50, veh: 8, spread: 0, auto: false, shake: 0.12 },
+  ak47: { interval: 0.1, ped: 40, cop: 34, veh: 6, spread: 0.03, auto: true, shake: 0.08 },
+};
+const ROCKET_SPEED = 46, BLAST_RADIUS = 9;
+const rocketGeo = new THREE.BoxGeometry(0.16, 0.16, 0.9);
+const rocketMat = new THREE.MeshStandardMaterial({ color: 0x4b5a34, emissive: 0xff7a2a, emissiveIntensity: 0.6 });
+// weapon models hang from the right hand: the arm's local -Y axis points forward while aiming
+const PROPS: Record<Exclude<Weapon, 'fist'>, THREE.BufferGeometry> = {
+  pistol: mergeBoxes([
+    { size: [0.07, 0.3, 0.1], pos: [0, -0.74, 0.04], color: 0x1c1c1f },
+    { size: [0.07, 0.1, 0.16], pos: [0, -0.62, -0.04], color: 0x1c1c1f },
+  ]),
+  ak47: mergeBoxes([
+    { size: [0.07, 0.9, 0.1], pos: [0, -0.92, 0.05], color: 0x232326 },
+    { size: [0.08, 0.34, 0.15], pos: [0, -0.5, 0.05], color: 0x7a4a22 },
+    { size: [0.08, 0.26, 0.12], pos: [0, -1.0, 0.05], color: 0x7a4a22 },
+    { size: [0.06, 0.12, 0.3], pos: [0, -0.8, -0.14], color: 0x232326 },
+  ]),
+  rocket: mergeBoxes([
+    { size: [0.17, 1.25, 0.17], pos: [0, -0.62, 0.16], color: 0x4b5a34 },
+    { size: [0.22, 0.2, 0.22], pos: [0, -1.3, 0.16], color: 0x2a2c2a },
+    { size: [0.2, 0.12, 0.2], pos: [0, 0.04, 0.16], color: 0x2a2c2a },
+    { size: [0.07, 0.12, 0.2], pos: [0, -0.66, -0.02], color: 0x1c1c1f },
+  ]),
+};
 
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
@@ -43,9 +76,13 @@ export class Game {
   readonly stats: Record<string, number> = { knockouts: 0, carsStolen: 0, busted: 0, wasted: 0 };
 
   state: GameState = 'menu';
-  weapon: 'fist' | 'pistol' = 'pistol'; // the player starts armed
-  hasPistol = true;
-  ammo = 36;
+  weapon: Weapon = 'pistol'; // the player starts armed
+  readonly ammoBy = { pistol: 36, ak47: 90, rocket: 6 };
+  readonly helis: Helicopter[] = [];
+  heli: Helicopter | null = null; // the one being flown
+  private nearHeli: Helicopter | null = null;
+  private rockets: { mesh: THREE.Mesh; vx: number; vz: number; life: number }[] = [];
+  private shownProp = '';
   private fireT = 0;
   money = 250;
   playTime = 0;
@@ -95,6 +132,12 @@ export class Game {
     this.officers = new Officers(this);
     this.missions = new Missions(this);
     this.missions.placePackages();
+    // helicopters: one in the park south of downtown, two on the beaches
+    for (const home of [{ x: 24, z: 252, heading: Math.PI }, { x: 30, z: 492, heading: Math.PI / 2 }, { x: 492, z: -30, heading: 0 }]) {
+      const h = new Helicopter(home);
+      this.helis.push(h);
+      this.scene.add(h.group);
+    }
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -152,6 +195,7 @@ export class Game {
   resetPlayer(x?: number, z?: number, heading = Math.PI) {
     const c = this.city.blockCorner(6, 6, 0);
     const p = this.player;
+    if (this.heli) this.leaveHeli();
     p.pos.set(x ?? c.x, 0.15, z ?? c.z + 14);
     p.pos.y = this.city.groundHeight(p.pos.x, p.pos.z);
     p.vel.set(0, 0, 0);
@@ -231,8 +275,9 @@ export class Game {
       collected: [...this.missions.collected],
       stats: this.stats,
       savedAt: Date.now(),
-      ammo: this.ammo,
-      hasPistol: this.hasPistol,
+      ammo: this.ammoBy.pistol,
+      ammoAk: this.ammoBy.ak47,
+      ammoRocket: this.ammoBy.rocket,
     });
   }
   load(): boolean {
@@ -247,8 +292,10 @@ export class Game {
     (d.completed || []).forEach((id) => this.missions.completed.add(id));
     (d.collected || []).forEach((id) => this.missions.collected.add(id));
     Object.assign(this.stats, d.stats || {});
-    this.ammo = d.ammo ?? 36; // saves from before the pistol was standard get a full load
-    this.hasPistol = true;
+    // saves from before a weapon existed get its starting load
+    this.ammoBy.pistol = d.ammo ?? 36;
+    this.ammoBy.ak47 = d.ammoAk ?? 90;
+    this.ammoBy.rocket = d.ammoRocket ?? 6;
     this.missions.placePackages();
     const blocked = this.city.collision.pointBlocked(d.x, 0.5, d.z, 0.6);
     if (blocked) this.resetPlayer();
@@ -335,22 +382,29 @@ export class Game {
     }
 
     // --- interaction
-    const near = p.vehicle ? null : this.nearestVehicle(p.pos.x, p.pos.z, 4.2);
+    const near = p.vehicle || this.heli ? null : this.nearestVehicle(p.pos.x, p.pos.z, 4.2);
+    this.nearHeli = null;
+    if (!p.vehicle && !this.heli)
+      for (const h of this.helis) if (!h.destroyed && h.pos.distanceToSquared(p.pos) < 22) this.nearHeli = h;
     if (!frozen) {
       if (input.wasPressed('KeyE')) {
-        if (p.vehicle) this.exitVehicle();
+        if (this.heli) this.exitHeli();
+        else if (p.vehicle) this.exitVehicle();
+        else if (this.nearHeli) this.enterHeli(this.nearHeli);
         else if (near) this.enterVehicle(near);
       }
       const act = input.wasPressed('KeyF') || (input.locked && input.wasPressed('Mouse0'));
-      if (input.wasPressed('Digit1')) this.weapon = 'fist';
-      if (input.wasPressed('Digit2')) {
-        if (this.hasPistol) this.weapon = 'pistol';
-        else this.hud.notify('ピストルを持っていない（オレンジの弾薬箱を探せ）', 'warn');
-      }
-      if (act && !p.vehicle) {
-        if (this.missions.nearStart && input.wasPressed('KeyF')) this.missions.start(this.missions.nearStart);
-        else if (this.weapon === 'pistol') this.shoot();
-        else this.punch();
+      const held = input.isDown('KeyF') || (input.locked && input.isDown('Mouse0'));
+      for (let k = 0; k < WEAPON_KEYS.length; k++) if (input.wasPressed('Digit' + (k + 1))) this.weapon = WEAPON_KEYS[k];
+      if (!p.vehicle && !this.heli) {
+        if (act && this.missions.nearStart && input.wasPressed('KeyF')) {
+          this.missions.start(this.missions.nearStart);
+          this.fireT = 0.6; // the same key press must not also fire
+        } else if (this.weapon === 'fist') {
+          if (act) this.punch();
+        } else if (this.weapon === 'rocket') {
+          if (act) this.fireRocket();
+        } else if (act || (held && GUNS[this.weapon].auto)) this.shoot();
       }
       if (input.wasPressed('KeyM') && this.missions.active) this.missions.fail('ミッションを中止した');
       if (input.wasPressed('KeyH') && p.vehicle) {
@@ -403,8 +457,15 @@ export class Game {
     }
 
     // --- characters
+    this.updateHelis(dt, frozen, smokeNow);
+    this.updateRockets(dt);
     p.update(dt, input, camFwd, this.city, frozen);
-    if (!p.vehicle) this.pushPlayerFromVehicles();
+    if (this.heli) {
+      p.pos.copy(this.heli.pos);
+      p.heading = this.heli.heading;
+    }
+    if (!p.vehicle && !this.heli) this.pushPlayerFromVehicles();
+    this.syncProp();
     this.peds.update(dt);
     this.officers.update(dt);
     this.fireT -= dt;
@@ -425,11 +486,12 @@ export class Game {
     this.env.update(dt, p.pos, this.camera);
     this.city.setNight(this.env.night);
     this.effects.update(dt);
-    this.rig.update(dt, input, p.pos, car ? car.heading : null, car ? car.speed : p.speed, this.city.collision);
+    const ride = this.heli;
+    this.rig.update(dt, input, p.pos, car ? car.heading : ride ? ride.heading : null, car ? car.speed : ride ? ride.airspeed : p.speed, this.city.collision);
     this.updateHeadlight(car);
     let siren = Infinity;
     for (const v of this.traffic.police) if (v.driver === 'police') siren = Math.min(siren, Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z));
-    this.audio.update(!!car, car ? car.speed : 0, car ? car.throttle : 0, siren, this.env.rain);
+    this.audio.update(!!car || !!ride, car ? car.speed : ride ? ride.spin * (16 + ride.airspeed * 0.4) : 0, car ? car.throttle : ride ? ride.spin : 0, siren, this.env.rain);
 
     this.updateHud(near, car);
   }
@@ -446,7 +508,10 @@ export class Game {
   private updateHud(near: Vehicle | null, car: Vehicle | null) {
     const p = this.player, m = this.missions;
     if (this.frozen <= 0 && !this.prompt) {
-      if (car) {
+      if (this.heli) {
+        if (this.heli.pos.y < 0.6 && this.heli.airspeed < 3) this.prompt = ['E', 'ヘリから降りる'];
+      } else if (this.nearHeli) this.prompt = ['E', 'ヘリコプターに乗る'];
+      else if (car) {
         if (Math.abs(car.speed) < 6) this.prompt = ['E', '降りる'];
       } else if (m.nearStart) this.prompt = ['F', `ミッション開始: ${m.nearStart.name}（報酬 $${m.nearStart.reward}）`];
       else if (near) this.prompt = ['E', near.driver === 'police' ? 'パトカー（ロック中）' : `${near.spec.name}に乗る${near.driver === 'ai' ? '（強奪）' : ''}`];
@@ -461,19 +526,19 @@ export class Game {
       clock: this.env.clock,
       weather: WEATHER_LABEL[this.env.weather],
       district: d ? DISTRICT_NAMES[d] : 'ベラ海岸',
-      speedKmh: car ? Math.round(Math.abs(car.speed) * 3.6) : null,
-      carHealth: car ? Math.round(car.health) : 0,
-      carName: car ? car.spec.name : '',
+      speedKmh: car ? Math.round(Math.abs(car.speed) * 3.6) : this.heli ? Math.round(this.heli.airspeed * 3.6) : null,
+      carHealth: car ? Math.round(car.health) : this.heli ? Math.round(this.heli.health) : 0,
+      carName: car ? car.spec.name : this.heli ? 'ヘリコプター  高度 ' + Math.round(this.heli.pos.y) + 'm' : '',
       objective: m.objectiveText,
       timer: m.active ? Math.ceil(m.active.timeLeft) : null,
       fps: this.fps,
-      weapon: this.weapon === 'pistol' ? 'ピストル  ' + this.ammo + '発' : this.hasPistol ? '素手（2: ピストル）' : '素手',
-      aim: this.weapon === 'pistol' && !car,
+      weapon: this.weapon === 'fist' ? '素手' : WEAPON_NAME[this.weapon] + '  ' + this.ammoBy[this.weapon] + '発',
+      aim: this.weapon !== 'fist' && !car && !this.heli,
     });
     if (++this.mapTick % 2 === 0) {
       this.blips.length = 0;
       this.collectBlips(this.blips);
-      this.hud.drawMinimap(p.pos.x, p.pos.z, p.heading, this.rig.yaw, this.blips, car ? 0.42 : 0.6);
+      this.hud.drawMinimap(p.pos.x, p.pos.z, p.heading, this.rig.yaw, this.blips, this.heli ? 0.3 : car ? 0.42 : 0.6);
     }
   }
 
@@ -487,6 +552,7 @@ export class Game {
         out.push({ x: v.pos.x, z: v.pos.z, color: v.driver === 'none' ? '#cfd6e0' : '#8fa0b5', shape: 'square', size: 2 });
     }
     for (const o of this.officers.list) if (!o.down) out.push({ x: o.pos.x, z: o.pos.z, color: '#3b7bff', shape: 'dot', size: 3.5 });
+    for (const h of this.helis) if (!h.destroyed && h !== this.heli) out.push({ x: h.pos.x, z: h.pos.z, color: '#ffffff', shape: 'diamond', size: 4, clampEdge: true });
     this.missions.blips(out);
   }
 
@@ -602,11 +668,10 @@ export class Game {
   }
 
   giveAmmo(n: number) {
-    const first = !this.hasPistol;
-    this.hasPistol = true;
-    this.ammo += n;
-    if (first) this.weapon = 'pistol';
-    this.hud.notify(first ? 'ピストルを手に入れた（1: 素手 / 2: ピストル）' : '弾薬 +' + n, 'good');
+    this.ammoBy.pistol += n;
+    this.ammoBy.ak47 += n * 2;
+    if (n >= 24) this.ammoBy.rocket += 2;
+    this.hud.notify(n >= 24 ? '弾薬を補給した（ピストル・AK-47・ロケット）' : '弾薬を拾った', 'good');
   }
 
   /** Shared consequence of hurting a pedestrian with fists or bullets. */
@@ -650,24 +715,35 @@ export class Game {
     if (ped) this.hurtPed(ped, 34, nx, nz, false);
   }
 
-  /** Pistol: hitscan along the camera direction with a little aim assist. */
+  private dryFire() {
+    this.fireT = 0.4;
+    this.audio.blip(140, 0.05, 'square');
+    this.hud.notify('弾切れ（オレンジの弾薬箱で補給）', 'warn');
+  }
+
+  /** Show the equipped weapon in the player's hand. */
+  private syncProp() {
+    const key = this.player.vehicle || this.heli ? 'fist' : this.weapon;
+    if (key === this.shownProp) return;
+    this.shownProp = key;
+    this.player.char.setProp(key === 'fist' ? null : new THREE.Mesh(PROPS[key], vertexColorMaterial));
+  }
+
+  /** Pistol / AK-47: hitscan along the camera direction with a little aim assist. */
   private shoot() {
     const p = this.player;
-    if (this.fireT > 0) return;
-    if (this.ammo <= 0) {
-      this.fireT = 0.4;
-      this.audio.blip(140, 0.05, 'square');
-      this.hud.notify('弾切れ（オレンジの弾薬箱で補給）', 'warn');
-      return;
-    }
-    this.fireT = 0.3;
-    this.ammo--;
+    if (this.fireT > 0 || this.weapon === 'fist' || this.weapon === 'rocket') return;
+    const gun = GUNS[this.weapon];
+    if (this.ammoBy[this.weapon] <= 0) return this.dryFire();
+    this.fireT = gun.interval;
+    this.ammoBy[this.weapon]--;
     this.rig.forward(camFwd);
-    const fx = camFwd.x, fz = camFwd.z;
-    p.heading = Math.atan2(fx, fz);
-    p.char.punchT = 0.25;
+    const aim = Math.atan2(camFwd.x, camFwd.z);
+    const ang = aim + (Math.random() - 0.5) * 2 * gun.spread;
+    const fx = Math.sin(ang), fz = Math.cos(ang);
+    p.heading = aim;
     const ox = p.pos.x, oz = p.pos.z;
-    const RANGE = 55;
+    const RANGE = 60;
     // nearest thing inside a narrow cone: officers, pedestrians, vehicles
     let best = RANGE, kind = 0, target: any = null;
     const test = (x: number, z: number, radius: number, k: number, obj: any) => {
@@ -690,27 +766,189 @@ export class Game {
         target = null;
         break;
       }
-    this.effects.tracer(ox + fx * 0.6, 1.35, oz + fz * 0.6, ox + fx * reach, 1.2, oz + fz * reach);
+    this.effects.tracer(ox + fx * 0.9, 1.35, oz + fz * 0.9, ox + fx * reach, 1.2, oz + fz * reach);
     this.audio.shot(0);
-    this.rig.shake = 0.12;
+    this.rig.shake = Math.max(this.rig.shake, gun.shake);
     this.peds.scareAround(ox, oz, 28);
     if (!target) {
       if (this.peds.list.some((q) => Math.abs(q.pos.x - ox) < 35 && Math.abs(q.pos.z - oz) < 35)) this.wanted.crime(1, 2, '発砲');
       return;
     }
     if (kind === 1) {
-      if (this.officers.hurt(target, 50, fx, fz)) this.onOfficerDown('警官を銃撃');
+      if (this.officers.hurt(target, gun.cop, fx, fz)) this.onOfficerDown('警官を銃撃');
       else this.wanted.crime(3, 4, '警官を銃撃');
-    } else if (kind === 2) this.hurtPed(target, 60, fx, fz, true);
+    } else if (kind === 2) this.hurtPed(target, gun.ped, fx, fz, true);
     else {
       const v = target as Vehicle;
-      v.health = Math.max(0, v.health - 8);
+      v.health = Math.max(0, v.health - gun.veh);
       if (v.driver === 'police') this.wanted.crime(2, 4, 'パトカーを銃撃');
       else if (v.driver === 'ai') {
         this.traffic.panic(v);
         this.wanted.crime(1, 3, '車両を銃撃');
       }
     }
+  }
+
+  // ------------------------------------------------------------------ rockets / explosions
+  private fireRocket() {
+    const p = this.player;
+    if (this.fireT > 0) return;
+    if (this.ammoBy.rocket <= 0) return this.dryFire();
+    this.fireT = 1.1;
+    this.ammoBy.rocket--;
+    this.rig.forward(camFwd);
+    p.heading = Math.atan2(camFwd.x, camFwd.z);
+    const mesh = new THREE.Mesh(rocketGeo, rocketMat);
+    mesh.position.set(p.pos.x + camFwd.x * 1.2, p.pos.y + 1.4, p.pos.z + camFwd.z * 1.2);
+    mesh.rotation.y = p.heading;
+    this.scene.add(mesh);
+    this.rockets.push({ mesh, vx: camFwd.x * ROCKET_SPEED, vz: camFwd.z * ROCKET_SPEED, life: 2.6 });
+    this.audio.rocket();
+    this.rig.shake = 0.3;
+    this.peds.scareAround(p.pos.x, p.pos.z, 20);
+  }
+
+  private updateRockets(dt: number) {
+    for (let k = this.rockets.length - 1; k >= 0; k--) {
+      const r = this.rockets[k], m = r.mesh.position;
+      m.x += r.vx * dt;
+      m.z += r.vz * dt;
+      r.life -= dt;
+      this.effects.smoke(m.x, m.y, m.z, 0.3);
+      let hit = r.life <= 0 || this.city.collision.pointBlocked(m.x, m.y, m.z) || Math.abs(m.x) > WORLD_BOUND + 60 || Math.abs(m.z) > WORLD_BOUND + 60;
+      if (!hit) for (const v of this.vehicles) if ((v.pos.x - m.x) ** 2 + (v.pos.z - m.z) ** 2 < (v.radius + 1.1) ** 2) { hit = true; break; }
+      if (!hit) for (const q of this.peds.list) if (q.state !== 'down' && (q.pos.x - m.x) ** 2 + (q.pos.z - m.z) ** 2 < 1) { hit = true; break; }
+      if (!hit) for (const o of this.officers.list) if (!o.down && (o.pos.x - m.x) ** 2 + (o.pos.z - m.z) ** 2 < 1) { hit = true; break; }
+      if (!hit) for (const h of this.helis) if (!h.destroyed && h !== this.heli && h.pos.distanceToSquared(m) < 12) { hit = true; break; }
+      if (!hit) continue;
+      this.scene.remove(r.mesh);
+      this.rockets.splice(k, 1);
+      this.explode(m.x, m.y, m.z);
+    }
+  }
+
+  /** Blast: wrecks and throws vehicles, knocks people down, hurts the player if close. */
+  explode(x: number, y: number, z: number) {
+    const p = this.player, R = BLAST_RADIUS;
+    const dist = Math.hypot(p.pos.x - x, p.pos.z - z);
+    this.effects.explosion(x, y, z);
+    this.audio.boom(dist);
+    this.rig.shake = Math.max(this.rig.shake, clamp(1.3 - dist / 35, 0, 1.3));
+    for (const v of this.vehicles) {
+      const dx = v.pos.x - x, dz = v.pos.z - z, d = Math.hypot(dx, dz);
+      if (d >= R) continue;
+      const f = 1 - d / R, inv = d > 0.01 ? 1 / d : 0;
+      v.health = Math.max(0, v.health - 140 * f);
+      v.vx += dx * inv * 16 * f;
+      v.vz += dz * inv * 16 * f;
+      if (v.driver === 'ai') {
+        if (v.wrecked) v.driver = 'none';
+        else this.traffic.panic(v);
+      }
+    }
+    let knocked = 0, cops = 0;
+    for (const q of this.peds.list) {
+      const dx = q.pos.x - x, dz = q.pos.z - z, d = Math.hypot(dx, dz);
+      if (q.state === 'down' || d >= R - 1) continue;
+      const inv = d > 0.01 ? 1 / d : 0;
+      this.peds.knockDown(q, dx * inv * 9, dz * inv * 9);
+      knocked++;
+    }
+    for (const o of this.officers.list) {
+      const dx = o.pos.x - x, dz = o.pos.z - z, d = Math.hypot(dx, dz);
+      if (o.down || d >= R - 1) continue;
+      const inv = d > 0.01 ? 1 / d : 0;
+      if (this.officers.hurt(o, 300, dx * inv, dz * inv)) cops++;
+    }
+    for (const h of this.helis) {
+      const d = Math.hypot(h.pos.x - x, h.pos.y - y, h.pos.z - z);
+      if (!h.destroyed && d < R) h.health = Math.max(0, h.health - 260 * (1 - d / R)); // a direct hit brings it down
+    }
+    if (!p.inHeli && !p.dead && dist < R && Math.abs(p.pos.y - y) < 6) {
+      const f = 1 - dist / R, inv = dist > 0.01 ? 1 / dist : 0;
+      this.damagePlayer((p.vehicle ? 40 : 90) * f);
+      if (!p.vehicle) {
+        p.vel.x += (p.pos.x - x) * inv * 10 * f;
+        p.vel.z += (p.pos.z - z) * inv * 10 * f;
+        p.vel.y = 5;
+        p.onGround = false;
+      }
+    }
+    this.peds.scareAround(x, z, 45);
+    this.stats.knockouts += knocked;
+    if (cops) this.onOfficerDown('警官を爆破');
+    else this.wanted.crime(knocked ? 3 : 2, 5, '爆破');
+  }
+
+  // ------------------------------------------------------------------ helicopters
+  private updateHelis(dt: number, frozen: boolean, smokeNow: boolean) {
+    const p = this.player;
+    for (const h of this.helis) {
+      if (h.destroyed) {
+        if ((h.respawnT -= dt) <= 0) h.reset();
+        continue;
+      }
+      h.update(dt, h === this.heli && !frozen ? this.input : null, this.city);
+      if (h.impact > 4) {
+        this.audio.crash(h.impact, h.pos.distanceTo(p.pos));
+        if (h === this.heli) this.rig.shake = 0.5;
+      }
+      if (smokeNow && h.health < 40) this.effects.smoke(h.pos.x, h.pos.y + 2, h.pos.z, 1 - h.health / 40);
+      // a dead helicopter falls; it blows up when it reaches the ground
+      if (h.health <= 0 && h.altitude(this.city) < 0.3) {
+        const mine = h === this.heli;
+        h.destroyed = true;
+        h.respawnT = 30;
+        h.group.visible = false;
+        this.explode(h.pos.x, h.pos.y + 1, h.pos.z);
+        if (mine) {
+          this.leaveHeli();
+          this.damagePlayer(70);
+        }
+      }
+    }
+  }
+
+  enterHeli(h: Helicopter) {
+    const p = this.player;
+    this.heli = h;
+    h.piloted = true;
+    p.inHeli = true;
+    p.vel.set(0, 0, 0);
+    p.syncMesh();
+    this.audio.door();
+    this.hud.notify('🚁 <b>Space</b> 上昇 / <b>Shift</b> 下降 / <b>W A S D</b> 飛行。着陸して <b>E</b> で降りる。');
+  }
+
+  /** Normal exit: only when landed at street level. */
+  exitHeli() {
+    const h = this.heli;
+    if (!h) return;
+    if (h.pos.y > 0.6) return this.hud.notify(h.altitude(this.city) < 0.3 ? '屋上では降りられない。地上に着陸しよう' : '着陸してから降りよう', 'warn');
+    if (h.airspeed > 3) return this.hud.notify('止まってから降りよう', 'warn');
+    if (Math.abs(h.pos.x) > WORLD_BOUND - 2 || Math.abs(h.pos.z) > WORLD_BOUND - 2) return this.hud.notify('海の上では降りられない', 'warn');
+    this.leaveHeli();
+    this.audio.door();
+  }
+
+  /** Put the player back on their feet beside the helicopter (also used when it is destroyed). */
+  private leaveHeli() {
+    const h = this.heli, p = this.player;
+    if (!h) return;
+    h.piloted = false;
+    this.heli = null;
+    p.inHeli = false;
+    const lx = Math.cos(h.heading), lz = -Math.sin(h.heading);
+    for (const s of [1, -1]) {
+      const x = clamp(h.pos.x + lx * 2.4 * s, -WORLD_BOUND, WORLD_BOUND), z = clamp(h.pos.z + lz * 2.4 * s, -WORLD_BOUND, WORLD_BOUND);
+      if (!this.city.collision.pointBlocked(x, h.pos.y + 0.5, z, 0.4) || s === -1) {
+        p.pos.set(x, Math.max(h.pos.y, this.city.groundHeight(x, z)), z);
+        break;
+      }
+    }
+    p.vel.set(0, 0, 0);
+    p.heading = h.heading;
+    p.syncMesh();
   }
 
   onPedRunOver(_ped: Ped, v: Vehicle, closing: number) {
@@ -725,6 +963,7 @@ export class Game {
   private takeDown(title: string, color: string, sub: string, at: { x: number; z: number; label: string }, penalty: number) {
     const p = this.player;
     this.missions.fail(title === 'BUSTED' ? '逮捕された' : '力尽きた');
+    if (this.heli) this.leaveHeli();
     if (p.vehicle) this.exitVehicle(true);
     p.dead = true;
     p.group.rotation.x = -Math.PI / 2;

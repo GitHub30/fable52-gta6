@@ -20,8 +20,12 @@ export class Input {
     canvas.addEventListener('mousedown', (e) => {
       if (!this.locked) this.dragging = true;
       this.pressed.add('Mouse' + e.button);
+      this.down.add('Mouse' + e.button);
     });
-    window.addEventListener('mouseup', () => (this.dragging = false));
+    window.addEventListener('mouseup', (e) => {
+      this.dragging = false;
+      this.down.delete('Mouse' + e.button);
+    });
     window.addEventListener('mousemove', (e) => {
       if (this.locked || this.dragging) {
         this.mouseDX += e.movementX;

@@ -318,7 +318,7 @@ export class Traffic {
         if (fd <= 0 || fd > reach + 2.5) continue;
         if (Math.abs(rx * fz - rz * fx) < 1.9) { blocked = true; break; }
       }
-      if (!blocked && !g.player.vehicle) blocked = this.ahead(g.player.pos.x - px, g.player.pos.z - pz, fx, fz, reach);
+      if (!blocked && !g.player.vehicle && !g.player.inHeli) blocked = this.ahead(g.player.pos.x - px, g.player.pos.z - pz, fx, fz, reach);
       if (!blocked) for (const ped of g.peds.list) {
         if (ped.state !== 'down' && this.ahead(ped.pos.x - px, ped.pos.z - pz, fx, fz, reach)) { blocked = true; break; }
       }

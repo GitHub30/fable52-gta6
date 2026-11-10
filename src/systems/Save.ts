@@ -15,7 +15,8 @@ export interface SaveData {
   stats: Record<string, number>;
   savedAt: number;
   ammo?: number;
-  hasPistol?: boolean;
+  ammoAk?: number;
+  ammoRocket?: number;
 }
 
 export const Save = {

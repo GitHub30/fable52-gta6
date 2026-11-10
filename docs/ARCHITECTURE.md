@@ -29,6 +29,7 @@ src/
     Character.ts       人型モデル（5 メッシュ）と歩行アニメーション。プレイヤーと歩行者で共用
     Player.ts          徒歩の移動・ジャンプ・衝突
     Vehicle.ts         車モデル生成、アーケード車両物理、車同士の衝突
+    Helicopter.ts      操縦できるヘリ（上昇下降・前進・旋回、ビルとの衝突、屋上着陸）
   ai/
     Traffic.ts         一般車両 AI、信号機、警察の追跡運転、車両のリサイクル
     Pedestrians.ts     歩行者 AI（歩道巡回、横断、逃走、転倒、反撃）
@@ -81,6 +82,6 @@ src/
 | 車種追加 | `Vehicle.ts` の `SPECS` と、車体形状を返す `priusParts` / `alphardParts` のような関数 |
 | 地区・建物の見た目 | `City.ts` の地区判定とブロック生成 |
 | 新しい犯罪・手配ルール | `Game.ts` の該当イベントから `wanted.crime(min, cap, 理由)` |
-| 武器追加 | `Game.ts` の `shoot()`（ヒットスキャンと照準補正）と `weapon` の種類 |
+| 武器追加 | `Game.ts` の `GUNS`（連射間隔・ダメージ・拡散）と `PROPS`（手に持つモデル）。弾丸は `shoot()`、ロケットは `fireRocket()` と `explode()` |
 | 補給アイテムの配置 | `Missions.ts` コンストラクタの `place('ammo' / 'health', ...)` |
 | 天候追加 | `Environment.ts` の `Weather` と各ブレンド係数 |

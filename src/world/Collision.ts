@@ -77,6 +77,18 @@ export class CollisionWorld {
     return hit;
   }
 
+  /** Highest box top at (x,z) that is not above `y` (0 if none): lets aircraft land on roofs. */
+  topBelow(x: number, z: number, y: number): number {
+    const list = this.cells.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
+    let top = 0;
+    if (list)
+      for (let i = 0; i < list.length; i++) {
+        const b = list[i];
+        if (b.top <= y && b.top > top && x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) top = b.top;
+      }
+    return top;
+  }
+
   /** True if the point is inside a box (used by the camera and spawn checks). */
   pointBlocked(x: number, y: number, z: number, margin = 0): boolean {
     const list = this.cells.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
