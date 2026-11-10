@@ -1,3 +1,10 @@
+通天閣
+<img width="1920" height="1080" alt="スクリーンショット (1110)" src="https://github.com/user-attachments/assets/f538ea14-fe06-4ccb-8094-8515fad27de1" />
+
+あべのハルカス
+<img width="1920" height="1080" alt="スクリーンショット (1108)" src="https://github.com/user-attachments/assets/7aeacba8-8dbe-4b62-81b6-512b65227c9a" />
+
+
 # VELA BAY — Open World Sandbox
 
 **▶ ブラウザで遊ぶ: https://github30.github.io/fable52-gta6/**
