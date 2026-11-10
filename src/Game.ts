@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Input } from './core/Input';
 import { CameraRig } from './core/CameraRig';
 import { GameAudio } from './core/Audio';
-import { City, DISTRICT_NAMES } from './world/City';
+import { City, PLACES } from './world/City';
+import type { WorldData } from './world/WorldData';
 import { Environment, WEATHER_LABEL, Weather } from './world/Environment';
 import { Effects } from './world/Effects';
 import { Player } from './entities/Player';
@@ -16,7 +17,7 @@ import { Wanted } from './systems/Wanted';
 import { Missions } from './systems/Missions';
 import { Save } from './systems/Save';
 import { Hud, Blip } from './ui/Hud';
-import { N, BLOCK, PITCH, PARK_OFFSET, WORLD_BOUND, roadCoord, mulberry32, rand, clamp } from './config';
+import { BOUND, mulberry32, rand, clamp } from './config';
 
 export type GameState = 'menu' | 'playing' | 'paused';
 const camFwd = { x: 0, z: 0 };
@@ -62,7 +63,8 @@ export class Game {
   readonly rig = new CameraRig(this.camera);
   readonly input: Input;
   readonly audio = new GameAudio();
-  readonly city = new City();
+  readonly city: City;
+  private spawnPoint = { x: 0, z: 0, heading: 0 };
   readonly env: Environment;
   readonly effects: Effects;
   readonly player = new Player();
@@ -108,7 +110,9 @@ export class Game {
   /** Prompt requested for this frame as [key, text]; applied once at the end of the frame. */
   prompt: [string, string] | null = null;
 
-  constructor(readonly canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
+  constructor(readonly canvas: HTMLCanvasElement, uiRoot: HTMLElement, data: WorldData) {
+    this.city = new City(data);
+    this.spawnPoint = this.city.sideSpot(PLACES.tsutenkaku.x + 35, PLACES.tsutenkaku.z + 60);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY_STEPS[0]));
     this.renderer.shadowMap.enabled = true;
@@ -120,6 +124,7 @@ export class Game {
     this.env = new Environment(this.scene);
     this.effects = new Effects(this.scene);
     this.hud = new Hud(uiRoot, this.city);
+    this.rig.groundAt = (x, z) => this.city.groundHeight(x, z);
     this.scene.add(this.city.group, this.player.group, this.headlight, this.headlight.target);
     this.player.onStep = () => this.audio.step();
     this.player.onJump = () => this.audio.jump();
@@ -132,9 +137,10 @@ export class Game {
     this.officers = new Officers(this);
     this.missions = new Missions(this);
     this.missions.placePackages();
-    // helicopters: one in the park south of downtown, two on the beaches
-    for (const home of [{ x: 24, z: 252, heading: Math.PI }, { x: 30, z: 492, heading: Math.PI / 2 }, { x: 492, z: -30, heading: 0 }]) {
-      const h = new Helicopter(home);
+    // helicopters: on the Tenshiba lawn, beside the zoo and in the Shitennoji precinct
+    for (const at of [PLACES.tenshiba, { x: PLACES.zoo.x, z: PLACES.zoo.z + 40 }, { x: PLACES.shitennoji.x + 40, z: PLACES.shitennoji.z + 30 }]) {
+      const s = this.city.clearSpot(at.x, at.z, 5.5);
+      const h = new Helicopter({ x: s.x, z: s.z, heading: Math.PI }, this.city);
       this.helis.push(h);
       this.scene.add(h.group);
     }
@@ -164,6 +170,7 @@ export class Game {
   addVehicle(kind: VehicleKind, x: number, z: number, heading: number, color?: number) {
     const v = new Vehicle(kind, color);
     v.place(x, z, heading);
+    v.settle(this.city);
     this.vehicles.push(v);
     this.scene.add(v.mesh);
     return v;
@@ -175,37 +182,48 @@ export class Game {
   }
 
   private spawnParkedCars() {
-    const rng = mulberry32(777);
+    const rng = mulberry32(777), city = this.city;
     const kinds: VehicleKind[] = ['prius', 'prius', 'prius', 'alphard', 'alphard', 'taxi'];
-    for (let n = 0; n < 80; n++) {
-      const alongZ = rng() < 0.5;
-      const line = roadCoord(Math.floor(rng() * (N + 1)));
-      const seg = Math.floor(rng() * N);
-      const along = roadCoord(seg) + PITCH / 2 + (rng() - 0.5) * (BLOCK - 26);
-      const side = rng() < 0.5 ? 1 : -1;
-      const kind = kinds[Math.floor(rng() * kinds.length)];
-      // parked facing the direction of travel on that side (right-hand traffic)
-      if (alongZ) this.addVehicle(kind, line - side * PARK_OFFSET, along, side > 0 ? 0 : Math.PI);
-      else this.addVehicle(kind, along, line + side * PARK_OFFSET, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+    // kerbside parking: wide one-way streets, wide two-way streets and quiet residential roads
+    const edges = city.data.edges.filter((e) => e.car && e.len > 30 && (e.oneway ? e.w >= 9 : e.w >= 13 || (e.k === 3 && e.w >= 5.5)));
+    const parkAt = (kind: VehicleKind, x: number, z: number, heading: number, color?: number) => {
+      if (Math.abs(x) > BOUND.x - 6 || Math.abs(z) > BOUND.z - 6 || city.collision.pointBlocked(x, 0, z, 1.6)) return null;
+      for (const v of this.vehicles) if ((v.pos.x - x) ** 2 + (v.pos.z - z) ** 2 < 64) return null;
+      return this.addVehicle(kind, x, z, heading, color);
+    };
+    for (let n = 0, made = 0; n < 500 && made < 70; n++) {
+      const e = edges[Math.floor(rng() * edges.length)], p = e.pts;
+      const side = rng() < 0.5 ? 1 : -1; // 1 = left of a -> b
+      let run = 8 + rng() * (e.len - 16);
+      for (let i = 0; i < p.length - 2; i += 2) {
+        const sx = p[i + 2] - p[i], sz = p[i + 3] - p[i + 1], len = Math.hypot(sx, sz);
+        if (run > len) { run -= len; continue; }
+        const dx = sx / len, dz = sz / len, off = (e.w / 2 - 1.15) * side;
+        // parked facing the flow on that side (left-hand traffic)
+        const heading = Math.atan2(dx, dz) + (side > 0 || e.oneway ? 0 : Math.PI);
+        if (parkAt(kinds[Math.floor(rng() * kinds.length)], p[i] + dx * run + dz * off, p[i + 1] + dz * run - dx * off, heading)) made++;
+        break;
+      }
     }
-    // emergency vehicles: an ambulance outside the hospital, a fire engine one block east of the spawn
-    const specials: [VehicleKind, number, number][] = [
-      ['ambulance', roadCoord(4) - PARK_OFFSET, roadCoord(5) + 24],
-      ['firetruck', roadCoord(7) - PARK_OFFSET - 0.2, roadCoord(6) + 34],
+    // fixed vehicles: the starter car by the spawn, an ambulance by the hospital, a fire engine by Tennoji station
+    const fixed: [VehicleKind, number, number, number?][] = [
+      ['prius', this.spawnPoint.x, this.spawnPoint.z, 0xd9dde2],
+      ['ambulance', 466, -371],
+      ['firetruck', PLACES.tennojiSta.x, PLACES.tennojiSta.z],
     ];
-    for (const [kind, x, z] of specials) {
-      for (const v of this.vehicles.filter((o) => Math.abs(o.pos.x - x) < 4 && Math.abs(o.pos.z - z) < 11)) this.removeVehicle(v);
-      this.addVehicle(kind, x, z, 0);
+    for (const [kind, x, z, color] of fixed) {
+      const h = city.roadSpot(x, z).hit, off = h.edge.w / 2 - 1.2;
+      const px = h.x + h.dz * off, pz = h.z - h.dx * off;
+      for (const v of this.vehicles.filter((o) => (o.pos.x - px) ** 2 + (o.pos.z - pz) ** 2 < 100)) this.removeVehicle(v);
+      this.addVehicle(kind, px, pz, Math.atan2(h.dx, h.dz), color);
     }
-    // a guaranteed starter car next to the spawn point
-    this.addVehicle('prius', roadCoord(6) + PARK_OFFSET, roadCoord(6) + 26, Math.PI, 0xd9dde2);
   }
 
   resetPlayer(x?: number, z?: number, heading = Math.PI) {
-    const c = this.city.blockCorner(6, 6, 0);
+    const c = this.spawnPoint;
     const p = this.player;
     if (this.heli) this.leaveHeli();
-    p.pos.set(x ?? c.x, 0.15, z ?? c.z + 14);
+    p.pos.set(x ?? c.x, 0, z ?? c.z);
     p.pos.y = this.city.groundHeight(p.pos.x, p.pos.z);
     p.vel.set(0, 0, 0);
     p.heading = heading;
@@ -242,7 +260,7 @@ export class Game {
     this.hud.setVisible(true);
     this.state = 'playing';
     this.input.lock();
-    this.hud.notify('ようこそ、ベラ・ベイへ。<b>E</b> で車に乗り、<b>ピンクのマーカー</b>でミッション開始。');
+    this.hud.notify('ようこそ、大阪・新世界へ。<b>E</b> で車に乗り、<b>ピンクのマーカー</b>でミッション開始。');
   }
   pause() {
     if (this.state !== 'playing') return;
@@ -306,7 +324,7 @@ export class Game {
     this.ammoBy.ak47 = d.ammoAk ?? 90;
     this.ammoBy.rocket = d.ammoRocket ?? 6;
     this.missions.placePackages();
-    const blocked = this.city.collision.pointBlocked(d.x, 0.5, d.z, 0.6);
+    const blocked = Math.abs(d.x) > BOUND.x || Math.abs(d.z) > BOUND.z || this.city.collision.pointBlocked(d.x, 0.5, d.z, 0.6);
     if (blocked) this.resetPlayer();
     else this.resetPlayer(d.x, d.z, d.heading);
     return true;
@@ -453,7 +471,7 @@ export class Game {
         v.damage(v.impact);
         if (v.impact > 3 && dx < 90 && dz < 90) {
           this.audio.crash(v.impact, Math.hypot(dx, dz));
-          this.effects.sparks(v.pos.x + Math.sin(v.heading) * 2, 0.7, v.pos.z + Math.cos(v.heading) * 2, Math.min(14, Math.round(v.impact)));
+          this.effects.sparks(v.pos.x + Math.sin(v.heading) * 2, v.pos.y + 0.7, v.pos.z + Math.cos(v.heading) * 2, Math.min(14, Math.round(v.impact)));
         }
         if (v === car) {
           this.rig.shake = Math.min(0.8, v.impact * 0.04);
@@ -462,7 +480,7 @@ export class Game {
         if (v.wrecked && v.driver === 'ai') v.driver = 'none';
       }
       if (smokeNow && v.health < 40 && dx < 120 && dz < 120)
-        this.effects.smoke(v.pos.x + Math.sin(v.heading) * 1.6, 1, v.pos.z + Math.cos(v.heading) * 1.6, 1 - v.health / 40);
+        this.effects.smoke(v.pos.x + Math.sin(v.heading) * 1.6, v.pos.y + 1, v.pos.z + Math.cos(v.heading) * 1.6, 1 - v.health / 40);
     }
 
     // --- characters
@@ -478,7 +496,7 @@ export class Game {
     this.peds.update(dt);
     this.officers.update(dt);
     this.fireT -= dt;
-    if (car && Math.abs(car.speed) > 14 && car.handbrake && Math.random() < 0.5) this.effects.dust(car.pos.x, car.pos.z);
+    if (car && Math.abs(car.speed) > 14 && car.handbrake && Math.random() < 0.5) this.effects.dust(car.pos.x, car.pos.z, car.pos.y);
 
     // --- systems
     this.wanted.update(dt);
@@ -510,15 +528,15 @@ export class Game {
     h.intensity = car ? this.env.night * 220 : 0;
     if (!car || h.intensity < 1) return;
     const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-    h.position.set(car.pos.x + fx * 1.8, 1.1, car.pos.z + fz * 1.8);
-    h.target.position.set(car.pos.x + fx * 24, 0, car.pos.z + fz * 24);
+    h.position.set(car.pos.x + fx * 1.8, car.pos.y + 1.1, car.pos.z + fz * 1.8);
+    h.target.position.set(car.pos.x + fx * 24, car.pos.y, car.pos.z + fz * 24);
   }
 
   private updateHud(near: Vehicle | null, car: Vehicle | null) {
     const p = this.player, m = this.missions;
     if (this.frozen <= 0 && !this.prompt) {
       if (this.heli) {
-        if (this.heli.pos.y < 0.6 && this.heli.airspeed < 3) this.prompt = ['E', 'ヘリから降りる'];
+        if (this.heli.pos.y - this.city.groundHeight(this.heli.pos.x, this.heli.pos.z) < 0.6 && this.heli.airspeed < 3) this.prompt = ['E', 'ヘリから降りる'];
       } else if (this.nearHeli) this.prompt = ['E', 'ヘリコプターに乗る'];
       else if (car) {
         if (Math.abs(car.speed) < 6) this.prompt = ['E', '降りる'];
@@ -526,7 +544,6 @@ export class Game {
       else if (near) this.prompt = ['E', near.driver === 'police' ? 'パトカー（ロック中）' : `${near.spec.name}に乗る${near.driver === 'ai' ? '（強奪）' : ''}`];
     }
     this.hud.setPrompt(this.prompt ? this.prompt[0] : null, this.prompt ? this.prompt[1] : '');
-    const d = this.city.districtAt(p.pos.x, p.pos.z);
     this.hud.update({
       money: this.money,
       health: Math.round(p.health),
@@ -534,7 +551,7 @@ export class Game {
       wantedFlash: this.wanted.level > 0 && !this.wanted.seen,
       clock: this.env.clock,
       weather: WEATHER_LABEL[this.env.weather],
-      district: d ? DISTRICT_NAMES[d] : 'ベラ海岸',
+      district: this.city.districtName(p.pos.x, p.pos.z),
       speedKmh: car ? Math.round(Math.abs(car.speed) * 3.6) : this.heli ? Math.round(this.heli.airspeed * 3.6) : null,
       carHealth: car ? Math.round(car.health) : this.heli ? Math.round(this.heli.health) : 0,
       carName: car ? car.spec.name : this.heli ? 'ヘリコプター  高度 ' + Math.round(this.heli.pos.y) + 'm' : '',
@@ -641,7 +658,7 @@ export class Game {
     const p = this.player;
     for (const v of this.vehicles) {
       const dx = p.pos.x - v.pos.x, dz = p.pos.z - v.pos.z;
-      if (dx * dx + dz * dz > 16 || p.pos.y > 1.6) continue;
+      if (dx * dx + dz * dz > 16 || p.pos.y - v.pos.y > 1.6) continue;
       for (let i = 0; i < 2; i++) {
         v.circle(i, tmp);
         let nx = p.pos.x - tmp.x, nz = p.pos.z - tmp.z;
@@ -688,7 +705,7 @@ export class Game {
     ped.health -= damage;
     ped.pos.x += nx * 0.5;
     ped.pos.z += nz * 0.5;
-    this.effects.sparkle(ped.pos.x, 1.4, ped.pos.z, 2, 1.6, 0.6, 5);
+    this.effects.sparkle(ped.pos.x, this.city.groundHeight(ped.pos.x, ped.pos.z) + 1.4, ped.pos.z, 2, 1.6, 0.6, 5);
     this.peds.scareAround(ped.pos.x, ped.pos.z, gun ? 30 : 12);
     if (ped.health <= 0) {
       this.peds.knockDown(ped, nx * 4, nz * 4);
@@ -715,7 +732,7 @@ export class Game {
     const nx = Math.sin(p.heading), nz = Math.cos(p.heading);
     const cop = this.officers.findInFront(p.pos.x, p.pos.z, p.heading, 1.8);
     if (cop) {
-      this.effects.sparkle(cop.pos.x, 1.4, cop.pos.z, 2, 1.6, 0.6, 5);
+      this.effects.sparkle(cop.pos.x, this.city.groundHeight(cop.pos.x, cop.pos.z) + 1.4, cop.pos.z, 2, 1.6, 0.6, 5);
       if (this.officers.hurt(cop, 34, nx, nz)) this.onOfficerDown('警官への暴行');
       else this.wanted.crime(2, 3, '警官への暴行');
       return;
@@ -770,12 +787,12 @@ export class Game {
     // walls stop bullets
     let reach = best;
     for (let d = 1.5; d < best; d += 1.5)
-      if (this.city.collision.pointBlocked(ox + fx * d, 1.3, oz + fz * d)) {
+      if (this.city.collision.pointBlocked(ox + fx * d, p.pos.y + 1.3, oz + fz * d)) {
         reach = d;
         target = null;
         break;
       }
-    this.effects.tracer(ox + fx * 0.9, 1.35, oz + fz * 0.9, ox + fx * reach, 1.2, oz + fz * reach);
+    this.effects.tracer(ox + fx * 0.9, p.pos.y + 1.35, oz + fz * 0.9, ox + fx * reach, p.pos.y + 1.2, oz + fz * reach);
     this.audio.shot(0);
     this.rig.shake = Math.max(this.rig.shake, gun.shake);
     this.peds.scareAround(ox, oz, 28);
@@ -824,7 +841,7 @@ export class Game {
       m.z += r.vz * dt;
       r.life -= dt;
       this.effects.smoke(m.x, m.y, m.z, 0.3);
-      let hit = r.life <= 0 || this.city.collision.pointBlocked(m.x, m.y, m.z) || Math.abs(m.x) > WORLD_BOUND + 60 || Math.abs(m.z) > WORLD_BOUND + 60;
+      let hit = r.life <= 0 || this.city.collision.pointBlocked(m.x, m.y, m.z) || m.y < this.city.groundHeight(m.x, m.z) + 0.2 || Math.abs(m.x) > BOUND.x + 60 || Math.abs(m.z) > BOUND.z + 60;
       if (!hit) for (const v of this.vehicles) if ((v.pos.x - m.x) ** 2 + (v.pos.z - m.z) ** 2 < (v.radius + 1.1) ** 2) { hit = true; break; }
       if (!hit) for (const q of this.peds.list) if (q.state !== 'down' && (q.pos.x - m.x) ** 2 + (q.pos.z - m.z) ** 2 < 1) { hit = true; break; }
       if (!hit) for (const o of this.officers.list) if (!o.down && (o.pos.x - m.x) ** 2 + (o.pos.z - m.z) ** 2 < 1) { hit = true; break; }
@@ -933,9 +950,9 @@ export class Game {
   exitHeli() {
     const h = this.heli;
     if (!h) return;
-    if (h.pos.y > 0.6) return this.hud.notify(h.altitude(this.city) < 0.3 ? '屋上では降りられない。地上に着陸しよう' : '着陸してから降りよう', 'warn');
+    if (h.pos.y - this.city.groundHeight(h.pos.x, h.pos.z) > 0.6) return this.hud.notify(h.altitude(this.city) < 0.3 ? '屋上では降りられない。地上に着陸しよう' : '着陸してから降りよう', 'warn');
     if (h.airspeed > 3) return this.hud.notify('止まってから降りよう', 'warn');
-    if (Math.abs(h.pos.x) > WORLD_BOUND - 2 || Math.abs(h.pos.z) > WORLD_BOUND - 2) return this.hud.notify('海の上では降りられない', 'warn');
+    if (Math.abs(h.pos.x) > BOUND.x - 2 || Math.abs(h.pos.z) > BOUND.z - 2) return this.hud.notify('マップの外では降りられない', 'warn');
     this.leaveHeli();
     this.audio.door();
   }
@@ -949,7 +966,7 @@ export class Game {
     p.inHeli = false;
     const lx = Math.cos(h.heading), lz = -Math.sin(h.heading);
     for (const s of [1, -1]) {
-      const x = clamp(h.pos.x + lx * 2.4 * s, -WORLD_BOUND, WORLD_BOUND), z = clamp(h.pos.z + lz * 2.4 * s, -WORLD_BOUND, WORLD_BOUND);
+      const x = clamp(h.pos.x + lx * 2.4 * s, -BOUND.x, BOUND.x), z = clamp(h.pos.z + lz * 2.4 * s, -BOUND.z, BOUND.z);
       if (!this.city.collision.pointBlocked(x, h.pos.y + 0.5, z, 0.4) || s === -1) {
         p.pos.set(x, Math.max(h.pos.y, this.city.groundHeight(x, z)), z);
         break;
@@ -988,13 +1005,13 @@ export class Game {
   }
   wasted() {
     this.stats.wasted++;
-    const c = this.city.blockCorner(3, 5, 1);
-    this.takeDown('WASTED', '#ff5a5a', '病院に搬送された', { ...c, label: 'ベラ総合病院' }, 0.1);
+    const c = this.city.sideSpot(466, -371);
+    this.takeDown('WASTED', '#ff5a5a', '病院に搬送された', { ...c, label: '病院前' }, 0.1);
   }
   busted() {
     this.stats.busted++;
-    const c = this.city.blockCorner(8, 6, 0);
-    this.takeDown('BUSTED', '#5aa0ff', '逮捕された', { ...c, label: '中央警察署' }, 0.15);
+    const c = this.city.sideSpot(-334, -546);
+    this.takeDown('BUSTED', '#5aa0ff', '逮捕された', { ...c, label: '警察署前' }, 0.15);
   }
 
   // ------------------------------------------------------------------ test hooks

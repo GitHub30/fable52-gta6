@@ -1,6 +1,6 @@
 import type { Weather } from '../world/Environment';
 
-const KEY = 'velabay.save.v1';
+const KEY = 'velabay.save.v2'; // v2: Osaka map (positions from the old city are meaningless)
 
 export interface SaveData {
   money: number;

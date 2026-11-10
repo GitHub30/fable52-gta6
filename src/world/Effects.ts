@@ -75,8 +75,8 @@ export class Effects {
     for (let k = 0; k < 16; k++)
       this.emit(x + r() * 3, y + 0.5, z + r() * 3, r() * 3, 2 + Math.random() * 4, r() * 3, 1.8 + Math.random() * 1.2, 2.4, 0.16, 0.16, 0.16, -0.4, 3.5);
   }
-  dust(x: number, z: number) {
-    this.emit(x, 0.2, z, (Math.random() - 0.5) * 1.5, 0.6, (Math.random() - 0.5) * 1.5, 0.8, 0.45, 0.75, 0.72, 0.66, 0, 1.5);
+  dust(x: number, z: number, y = 0) {
+    this.emit(x, y + 0.2, z, (Math.random() - 0.5) * 1.5, 0.6, (Math.random() - 0.5) * 1.5, 0.8, 0.45, 0.75, 0.72, 0.66, 0, 1.5);
   }
 
   /** Short-lived bullet streak from a to b. */

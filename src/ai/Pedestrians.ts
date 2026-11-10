@@ -1,16 +1,18 @@
 import * as THREE from 'three';
 import type { Game } from '../Game';
 import { Character, randomOutfit } from '../entities/Character';
-import { N, blockIndex, angleDiff, rand } from '../config';
+import type { Edge } from '../world/WorldData';
+import { angleDiff, rand } from '../config';
 
 export interface Ped {
   char: Character;
   pos: THREE.Vector3;
   heading: number;
-  bi: number;
-  bj: number;
-  corner: number;
+  edge: Edge; // road or path being walked
+  i: number; // index of the point being walked towards
   dir: 1 | -1;
+  side: 1 | -1; // which side of the road
+  lat: number; // -1..1 position across pedestrian streets
   tx: number;
   tz: number;
   pace: number;
@@ -23,17 +25,10 @@ export interface Ped {
   vz: number;
 }
 
-const PED_COUNT = 42;
+const PED_COUNT = 46;
 const c = { x: 0, z: 0 };
-// crossing table: [corner][0 = across X, 1 = across Z] -> [di, dj, new corner]
-const CROSS: [number, number, number][][] = [
-  [[-1, 0, 1], [0, -1, 3]],
-  [[1, 0, 0], [0, -1, 2]],
-  [[1, 0, 3], [0, 1, 1]],
-  [[-1, 0, 2], [0, 1, 0]],
-];
 
-/** Sidewalk pedestrians: stroll around blocks, cross streets, flee from danger, get knocked down. */
+/** Pedestrians on the real street network: they walk beside roads and along paths, flee from danger, get knocked down. */
 export class Pedestrians {
   readonly list: Ped[] = [];
   private tick = 0;
@@ -43,7 +38,7 @@ export class Pedestrians {
       const ped: Ped = {
         char: new Character(randomOutfit()),
         pos: new THREE.Vector3(),
-        heading: 0, bi: 0, bj: 0, corner: 0, dir: 1, tx: 0, tz: 0,
+        heading: 0, edge: game.city.data.edges[0], i: 1, dir: 1, side: Math.random() < 0.5 ? 1 : -1, lat: rand(-1, 1), tx: 0, tz: 0,
         pace: rand(1.2, 1.9), state: 'walk', t: 0, health: 100, vx: 0, vz: 0, brave: Math.random() < 0.3, atkT: 0,
       };
       this.list.push(ped);
@@ -52,30 +47,53 @@ export class Pedestrians {
     }
   }
 
+  /** Sideways distance from the road centre line for this pedestrian (positive = left of a -> b). */
+  private offset(p: Ped) {
+    const e = p.edge;
+    if (e.k >= 5) return p.lat * e.w * 0.35; // pedestrian streets and paths: anywhere across
+    return p.side * (e.k <= 2 ? e.w / 2 + 1.3 : Math.max(0.4, e.w / 2 - 0.7)); // beside the carriageway
+  }
+
   private setTarget(p: Ped) {
-    const t = this.game.city.blockCorner(p.bi, p.bj, p.corner);
-    // small offset so pedestrians do not walk in single file
-    p.tx = t.x + rand(-0.9, 0.9);
-    p.tz = t.z + rand(-0.9, 0.9);
+    const q = p.edge.pts, n = q.length / 2;
+    const i = Math.max(0, Math.min(n - 1, p.i));
+    const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
+    const dx = q[i1 * 2] - q[i0 * 2], dz = q[i1 * 2 + 1] - q[i0 * 2 + 1], l = Math.hypot(dx, dz) || 1;
+    let off = this.offset(p);
+    let x = q[i * 2] + (dz / l) * off, z = q[i * 2 + 1] - (dx / l) * off;
+    if (this.game.city.collision.pointBlocked(x, 0, z, 0.3)) {
+      // a building hugs the road here: walk at the kerb instead
+      off = Math.sign(off) * Math.max(0.3, p.edge.w / 2 - 0.6);
+      x = q[i * 2] + (dz / l) * off;
+      z = q[i * 2 + 1] - (dx / l) * off;
+    }
+    p.tx = x + rand(-0.3, 0.3);
+    p.tz = z + rand(-0.3, 0.3);
+  }
+
+  /** Put a pedestrian onto the road nearest to (x,z). */
+  private attach(p: Ped, x: number, z: number, snap: boolean) {
+    const h = this.game.city.nearestRoad(x, z, () => true, 120);
+    if (!h) return false;
+    p.edge = h.edge;
+    p.dir = Math.random() < 0.5 ? 1 : -1;
+    p.i = p.dir > 0 ? h.seg + 1 : h.seg;
+    if (snap) {
+      const off = this.offset(p);
+      p.pos.set(h.x + h.dz * off, 0, h.z - h.dx * off);
+    }
+    this.setTarget(p);
+    return true;
   }
 
   respawn(p: Ped, minD: number, maxD: number) {
     const pl = this.game.player.pos;
     for (let tries = 0; tries < 12; tries++) {
-      const x = pl.x + rand(-maxD, maxD), z = pl.z + rand(-maxD, maxD);
-      p.bi = blockIndex(x);
-      p.bj = blockIndex(z);
-      p.corner = Math.floor(Math.random() * 4);
-      const a = this.game.city.blockCorner(p.bi, p.bj, p.corner);
-      const d = Math.max(Math.abs(a.x - pl.x), Math.abs(a.z - pl.z));
+      p.side = Math.random() < 0.5 ? 1 : -1;
+      p.lat = rand(-1, 1);
+      if (!this.attach(p, pl.x + rand(-maxD, maxD), pl.z + rand(-maxD, maxD), true)) continue;
+      const d = Math.max(Math.abs(p.pos.x - pl.x), Math.abs(p.pos.z - pl.z));
       if (d < minD || d > maxD) continue;
-      p.dir = Math.random() < 0.5 ? 1 : -1;
-      const next = (p.corner + p.dir + 4) % 4;
-      const b = this.game.city.blockCorner(p.bi, p.bj, next);
-      const f = Math.random();
-      p.pos.set(a.x + (b.x - a.x) * f, 0.15, a.z + (b.z - a.z) * f);
-      p.corner = next;
-      this.setTarget(p);
       p.state = 'walk';
       p.health = 100;
       p.vx = p.vz = 0;
@@ -85,7 +103,7 @@ export class Pedestrians {
     }
   }
 
-  /** Spawn-in-place helper for ejected drivers: they run for the nearest sidewalk. */
+  /** Spawn-in-place helper for ejected drivers: they run off along the nearest street. */
   eject(x: number, z: number) {
     let best: Ped | null = null, bd = 0;
     const pl = this.game.player.pos;
@@ -96,17 +114,9 @@ export class Pedestrians {
     if (!best) return;
     const p = best;
     p.pos.set(x, 0, z);
-    p.bi = blockIndex(x);
-    p.bj = blockIndex(z);
-    let near = 0, nd = Infinity;
-    for (let k = 0; k < 4; k++) {
-      const a = this.game.city.blockCorner(p.bi, p.bj, k);
-      const d = (a.x - x) ** 2 + (a.z - z) ** 2;
-      if (d < nd) { nd = d; near = k; }
-    }
-    p.corner = near;
-    this.setTarget(p);
+    this.attach(p, x, z, false);
     p.health = 100;
+    p.state = 'walk';
     p.char.group.rotation.x = 0;
     this.scare(p, 10);
   }
@@ -132,22 +142,25 @@ export class Pedestrians {
   }
 
   private nextTarget(p: Ped) {
-    // sometimes cross the street to a neighbouring block, otherwise keep circling
-    if (Math.random() < 0.4) {
-      const opt = CROSS[p.corner][Math.random() < 0.5 ? 0 : 1];
-      const ni = p.bi + opt[0], nj = p.bj + opt[1];
-      if (ni >= 0 && ni < N && nj >= 0 && nj < N) {
-        p.bi = ni;
-        p.bj = nj;
-        p.corner = opt[2];
-        this.setTarget(p);
-        return;
+    p.i += p.dir;
+    const n = p.edge.pts.length / 2;
+    if (p.i < 0 || p.i >= n) {
+      // reached the end of this street: take another one from the junction (or turn back at a dead end)
+      const d = this.game.city.data, node = p.dir > 0 ? p.edge.b : p.edge.a;
+      const opts = d.adj[node].filter((id) => id !== p.edge.id);
+      if (opts.length) {
+        const e = d.edges[opts[Math.floor(Math.random() * opts.length)]];
+        p.edge = e;
+        p.dir = e.a === node ? 1 : -1;
+        p.i = p.dir > 0 ? 1 : e.pts.length / 2 - 2;
+        if (Math.random() < 0.3) p.side = -p.side as 1 | -1;
+      } else {
+        p.dir = -p.dir as 1 | -1;
+        p.i = Math.max(0, Math.min(n - 1, p.i + p.dir * 2));
       }
     }
-    if (Math.random() < 0.1) p.dir = -p.dir as 1 | -1;
-    p.corner = (p.corner + p.dir + 4) % 4;
     this.setTarget(p);
-    if (p.state === 'walk' && Math.random() < 0.18) {
+    if (p.state === 'walk' && Math.random() < 0.08) {
       p.state = 'idle';
       p.t = rand(2, 6);
     }

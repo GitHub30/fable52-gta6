@@ -133,7 +133,7 @@ export class Officers {
             const chance = pl.vehicle ? 0.5 : pl.speed > 5 ? 0.25 : 0.5;
             const hit = Math.random() < chance;
             const miss = hit ? 0 : rand(0.8, 2) * (Math.random() < 0.5 ? -1 : 1);
-            g.effects.tracer(o.pos.x, 1.4, o.pos.z, pl.pos.x + (dz / d) * miss, 1.1, pl.pos.z - (dx / d) * miss);
+            g.effects.tracer(o.pos.x, g.city.groundHeight(o.pos.x, o.pos.z) + 1.4, o.pos.z, pl.pos.x + (dz / d) * miss, pl.pos.y + 1.1, pl.pos.z - (dx / d) * miss);
             g.audio.shot(d);
             if (hit) {
               if (pl.vehicle) pl.vehicle.health = Math.max(0, pl.vehicle.health - 5);

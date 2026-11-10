@@ -12,6 +12,8 @@ export class CameraRig {
   private focus = new THREE.Vector3();
   private initialised = false;
   shake = 0;
+  /** Terrain height lookup so the camera never dips below the ground. */
+  groundAt: (x: number, z: number) => number = () => 0;
 
   constructor(readonly camera: THREE.PerspectiveCamera) {}
 
@@ -61,7 +63,8 @@ export class CameraRig {
       }
     }
     const cam = this.camera;
-    cam.position.set(this.focus.x + dx * d, Math.max(0.35, this.focus.y + dy * d), this.focus.z + dz * d);
+    const camX = this.focus.x + dx * d, camZ = this.focus.z + dz * d;
+    cam.position.set(camX, Math.max(this.groundAt(camX, camZ) + 0.4, this.focus.y + dy * d), camZ);
     if (this.shake > 0.001) {
       cam.position.x += (Math.random() - 0.5) * this.shake;
       cam.position.y += (Math.random() - 0.5) * this.shake;

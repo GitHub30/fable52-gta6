@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeBoxes, carPaintMaterial } from '../core/geo';
 import { Input } from '../core/Input';
 import { City } from '../world/City';
-import { WORLD_BOUND, clamp, damp } from '../config';
+import { BOUND, clamp, damp } from '../config';
 
 const push = { x: 0, z: 0 };
 const BODY = 0x2d6cdf, WHITE = 0xf2f2f2, DARK = 0x1b1d21, GLASS = 0x18222c;
@@ -28,7 +28,7 @@ export class Helicopter {
   private roll = 0;
   readonly radius = 2.1;
 
-  constructor(readonly home: { x: number; z: number; heading: number }) {
+  constructor(readonly home: { x: number; z: number; heading: number }, private city: City) {
     bodyGeo ??= mergeBoxes([
       { size: [1.7, 1.5, 2.7], pos: [0, 1.3, 0.3], color: BODY },
       { size: [1.72, 0.3, 2.72], pos: [0, 1.0, 0.3], color: WHITE },
@@ -67,7 +67,7 @@ export class Helicopter {
   }
 
   reset() {
-    this.pos.set(this.home.x, 0, this.home.z);
+    this.pos.set(this.home.x, this.city.groundHeight(this.home.x, this.home.z), this.home.z);
     this.vel.set(0, 0, 0);
     this.heading = this.home.heading;
     this.health = 100;
@@ -132,11 +132,10 @@ export class Helicopter {
         this.impact = -vn;
       }
     }
-    const lim = WORLD_BOUND + 220;
-    this.pos.x = clamp(this.pos.x, -lim, lim);
-    this.pos.z = clamp(this.pos.z, -lim, lim);
-    if (this.pos.y > 230) {
-      this.pos.y = 230;
+    this.pos.x = clamp(this.pos.x, -BOUND.x - 900, BOUND.x + 900);
+    this.pos.z = clamp(this.pos.z, -BOUND.z - 900, BOUND.z + 900);
+    if (this.pos.y > 420) {
+      this.pos.y = 420;
       this.vel.y = Math.min(0, this.vel.y);
     }
     const floor = this.floor(city);

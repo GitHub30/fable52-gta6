@@ -1,22 +1,7 @@
-// World layout constants and small math helpers shared by every system.
+// Small math helpers and the playable bounds shared by every system.
 
-export const N = 12; // blocks per side
-export const BLOCK = 60; // block edge length (m)
-export const ROAD = 16; // road width (m)
-export const PITCH = BLOCK + ROAD;
-export const HALF = (N * PITCH) / 2; // distance from origin to outer ring-road centre
-export const CITY_EDGE = HALF + ROAD / 2;
-export const WORLD_BOUND = CITY_EDGE + 48; // shoreline: nothing may go past this
-export const CURB = 0.15;
-export const LANE = 2.2; // lane centre offset from road centre
-export const PARK_OFFSET = 6.6; // parked-car offset from road centre
-
-/** World coordinate of road centre-line k (0..N). */
-export const roadCoord = (k: number) => -HALF + k * PITCH;
-/** Nearest road-line index to a coordinate. */
-export const nearestRoad = (v: number) => Math.max(0, Math.min(N, Math.round((v + HALF) / PITCH)));
-/** Block index containing coordinate (clamped). */
-export const blockIndex = (v: number) => Math.max(0, Math.min(N - 1, Math.floor((v + HALF) / PITCH)));
+/** Half extents of the playable area in metres. Filled in when the map data is loaded. */
+export const BOUND = { x: 700, z: 600 };
 
 export const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -28,7 +13,7 @@ export function angleDiff(a: number, b: number) {
   return d;
 }
 
-/** Deterministic PRNG so the city is identical on every load (needed for save/load). */
+/** Deterministic PRNG so generated details are identical on every load (needed for save/load). */
 export function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {

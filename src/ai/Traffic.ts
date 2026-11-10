@@ -1,18 +1,15 @@
 import * as THREE from 'three';
 import type { Game } from '../Game';
 import { Vehicle, VehicleKind } from '../entities/Vehicle';
-import { N, ROAD, PITCH, LANE, roadCoord, nearestRoad, clamp, angleDiff, rand } from '../config';
+import type { Edge } from '../world/WorldData';
+import { clamp, angleDiff, rand } from '../config';
 
-/** Per-vehicle route state: driving from node (ai,aj) to (bi,bj) along (dx,dz). */
+/** Per-vehicle route state: following a lane polyline towards the node at its end. */
 interface Route {
-  bi: number;
-  bj: number;
-  dx: number;
-  dz: number;
-  sx: number; // lane start point
-  sz: number;
-  len: number; // lane length from start to stop line
-  phase: 'turn' | 'seg';
+  edge: Edge;
+  dir: 1 | -1;
+  path: Float32Array; // lane points (x,z)
+  i: number; // index of the point being driven towards
   cruise: number;
   blockedT: number;
   ignoreT: number;
@@ -21,144 +18,96 @@ interface Route {
   reverseT: number;
   direct: boolean; // police: steering straight at the player
   honkT: number;
+  deadEnd: boolean;
 }
 
-const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-const START_OFF = ROAD / 2 + 2;
-const STOP_OFF = ROAD / 2 + 5;
-const CYCLE = 22, GREEN = 9, YELLOW = 2;
-const AI_COUNT = 34;
-const col = new THREE.Color();
+const AI_COUNT = 36;
+const CRUISE = [13, 11, 9.5, 7, 6, 5, 5];
 
-/** Ambient traffic, traffic lights and police pursuit driving. */
+/** Ambient traffic on the real road graph (left-hand traffic) and police pursuit driving. */
 export class Traffic {
-  private lamps: THREE.InstancedMesh;
-  private lampInfo: { i: number; j: number; ns: boolean }[] = [];
-  private lampTick = 0;
   private respawnTick = 0;
   time = 0;
   readonly police: Vehicle[] = [];
 
   constructor(private game: Game) {
-    // ---- traffic lights: one mast per approach, lamp hangs over the incoming lane
-    const mastGeo = new THREE.CylinderGeometry(0.1, 0.13, 5.6, 6);
-    mastGeo.translate(0, 2.8, 0);
-    const armLen = ROAD / 2 - LANE + 0.7;
-    const armGeo = new THREE.BoxGeometry(armLen, 0.12, 0.12);
-    armGeo.translate(armLen / 2, 5.5, 0);
-    const lampGeo = new THREE.BoxGeometry(0.42, 1.0, 0.42);
-    lampGeo.translate(armLen, 5.0, 0);
-    const approaches: { x: number; z: number; rot: number; i: number; j: number; ns: boolean }[] = [];
-    for (let i = 0; i <= N; i++)
-      for (let j = 0; j <= N; j++)
-        for (const [dx, dz] of DIRS) {
-          const pi = i - dx, pj = j - dz; // node the traffic comes from
-          if (pi < 0 || pi > N || pj < 0 || pj > N) continue;
-          const rx = -dz, rz = dx; // right of travel
-          const x = roadCoord(i) - dx * (ROAD / 2 + 1.2) + rx * (ROAD / 2 + 0.7);
-          const z = roadCoord(j) - dz * (ROAD / 2 + 1.2) + rz * (ROAD / 2 + 0.7);
-          approaches.push({ x, z, rot: Math.atan2(rz, -rx), i, j, ns: dz !== 0 });
-        }
-    const dark = new THREE.MeshStandardMaterial({ color: 0x2c2f33, roughness: 0.6 });
-    const masts = new THREE.InstancedMesh(mastGeo, dark, approaches.length);
-    const arms = new THREE.InstancedMesh(armGeo, dark, approaches.length);
-    this.lamps = new THREE.InstancedMesh(lampGeo, new THREE.MeshBasicMaterial(), approaches.length);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
-    approaches.forEach((a, k) => {
-      q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, a.rot);
-      m.compose(new THREE.Vector3(a.x, 0.15, a.z), q, one);
-      masts.setMatrixAt(k, m);
-      arms.setMatrixAt(k, m);
-      this.lamps.setMatrixAt(k, m);
-      this.lamps.setColorAt(k, col.setHex(0xff0000));
-      this.lampInfo.push({ i: a.i, j: a.j, ns: a.ns });
-    });
-    for (const im of [masts, arms, this.lamps]) im.frustumCulled = false;
-    game.scene.add(masts, arms, this.lamps);
-
     for (let k = 0; k < AI_COUNT; k++) this.spawnTraffic(true);
   }
 
-  // ------------------------------------------------------------------ lights
-  /** 0 = green, 1 = yellow, 2 = red for traffic moving along Z (ns) or X at node (i,j). */
-  light(i: number, j: number, ns: boolean) {
-    let t = (this.time + ((i * 7 + j * 13) % 4) * 5.5) % CYCLE;
-    if (!ns) t = (t + CYCLE / 2) % CYCLE;
-    return t < GREEN ? 0 : t < GREEN + YELLOW ? 1 : 2;
-  }
-  private updateLamps() {
-    const hex = [0x22ff55, 0xffcc22, 0xff2a2a];
-    for (let k = 0; k < this.lampInfo.length; k++) {
-      const a = this.lampInfo[k];
-      this.lamps.setColorAt(k, col.setHex(hex[this.light(a.i, a.j, a.ns)]));
-    }
-    this.lamps.instanceColor!.needsUpdate = true;
-  }
-
   // ------------------------------------------------------------------ routes
-  private setSegment(r: Route, ai: number, aj: number, dx: number, dz: number) {
-    r.bi = ai + dx;
-    r.bj = aj + dz;
-    r.dx = dx;
-    r.dz = dz;
-    r.sx = roadCoord(ai) + dx * START_OFF - dz * LANE;
-    r.sz = roadCoord(aj) + dz * START_OFF + dx * LANE;
-    r.len = PITCH - START_OFF - STOP_OFF;
-    r.phase = 'turn';
-  }
   private newRoute(): Route {
-    return { bi: 0, bj: 0, dx: 1, dz: 0, sx: 0, sz: 0, len: 0, phase: 'seg', cruise: rand(9, 13), blockedT: 0, ignoreT: 0, panicT: 0, stuckT: 0, reverseT: 0, direct: false, honkT: 0 };
+    const e = this.game.city.aiEdges[0];
+    return { edge: e, dir: 1, path: this.game.city.lane(e, 1), i: 1, cruise: 10, blockedT: 0, ignoreT: 0, panicT: 0, stuckT: 0, reverseT: 0, direct: false, honkT: 0, deadEnd: false };
   }
-  private validDirs(i: number, j: number, fromDx: number, fromDz: number) {
-    return DIRS.filter(([dx, dz]) => !(dx === -fromDx && dz === -fromDz) && i + dx >= 0 && i + dx <= N && j + dz >= 0 && j + dz <= N);
+  private setEdge(r: Route, e: Edge, dir: 1 | -1, i = 0) {
+    r.edge = e;
+    r.dir = dir;
+    r.path = this.game.city.lane(e, dir);
+    r.i = i;
+    r.cruise = CRUISE[e.k] * rand(0.9, 1.1);
+    r.deadEnd = false;
   }
-  /** Pick the next segment at the end of the current one. */
-  private advance(r: Route, chase: { x: number; z: number } | null) {
-    const opts = this.validDirs(r.bi, r.bj, r.dx, r.dz);
-    let choice = opts[0];
-    if (chase) {
-      let best = Infinity;
-      for (const o of opts) {
-        const d = Math.hypot(roadCoord(r.bi + o[0]) - chase.x, roadCoord(r.bj + o[1]) - chase.z);
-        if (d < best) { best = d; choice = o; }
-      }
-    } else {
-      const straight = opts.find(([dx, dz]) => dx === r.dx && dz === r.dz);
-      choice = straight && Math.random() < 0.55 ? straight : opts[Math.floor(Math.random() * opts.length)];
-    }
-    this.setSegment(r, r.bi, r.bj, choice[0], choice[1]);
+  private endNode(r: Route) {
+    return r.dir > 0 ? r.edge.b : r.edge.a;
   }
 
-  private spotFree(x: number, z: number, r = 9) {
-    for (const v of this.game.vehicles) if ((v.pos.x - x) ** 2 + (v.pos.z - z) ** 2 < r * r) return false;
+  /** Pick the next edge at the end of the current one. */
+  private advance(r: Route, chase: { x: number; z: number } | null, heading: number) {
+    const d = this.game.city.data, node = this.endNode(r);
+    let best: Edge | null = null, bestDir: 1 | -1 = 1, bestScore = Infinity;
+    for (const id of d.adj[node]) {
+      const e = d.edges[id];
+      if (e === r.edge || !(chase ? e.car : e.ai)) continue;
+      const dir: 1 | -1 | 0 = e.a === node ? 1 : e.oneway ? 0 : -1;
+      if (!dir) continue;
+      const far = dir > 0 ? e.b : e.a;
+      let score: number;
+      if (chase) score = Math.hypot(d.nodes[far * 2] - chase.x, d.nodes[far * 2 + 1] - chase.z);
+      else {
+        // prefer carrying straight on, with some randomness so traffic spreads out
+        const p = this.game.city.lane(e, dir);
+        const turn = Math.abs(angleDiff(Math.atan2(p[2] - p[0], p[3] - p[1]), heading));
+        score = turn + Math.random() * 1.6 + (far === node ? 9 : 0);
+      }
+      if (score < bestScore) { bestScore = score; best = e; bestDir = dir; }
+    }
+    if (best) return this.setEdge(r, best, bestDir);
+    // dead end (usually the map edge): police turn round, traffic gets recycled
+    if (!r.edge.oneway) this.setEdge(r, r.edge, -r.dir as 1 | -1);
+    else r.i = r.path.length / 2 - 1;
+    r.deadEnd = true;
+  }
+
+  private spotFree(x: number, z: number, radius = 9) {
+    for (const v of this.game.vehicles) if ((v.pos.x - x) ** 2 + (v.pos.z - z) ** 2 < radius * radius) return false;
     return true;
   }
 
   /** Find a lane position between minD and maxD from the player. */
   private pickSpawn(minD: number, maxD: number, r: Route) {
-    const p = this.game.player.pos;
-    for (let tries = 0; tries < 14; tries++) {
-      const i = nearestRoad(p.x + rand(-maxD, maxD)), j = nearestRoad(p.z + rand(-maxD, maxD));
-      const opts = this.validDirs(i, j, 0, 0);
-      const [dx, dz] = opts[Math.floor(Math.random() * opts.length)];
-      this.setSegment(r, i, j, dx, dz);
-      const s = rand(0, r.len - 6);
-      const x = r.sx + dx * s, z = r.sz + dz * s;
+    const p = this.game.player.pos, edges = this.game.city.aiEdges;
+    for (let tries = 0; tries < 30; tries++) {
+      const e = edges[Math.floor(Math.random() * edges.length)];
+      const dir: 1 | -1 = e.oneway || Math.random() < 0.5 ? 1 : -1;
+      const path = this.game.city.lane(e, dir), n = path.length / 2;
+      const i = 1 + Math.floor(Math.random() * (n - 1)), f = Math.random();
+      const x = path[i * 2 - 2] + (path[i * 2] - path[i * 2 - 2]) * f, z = path[i * 2 - 1] + (path[i * 2 + 1] - path[i * 2 - 1]) * f;
       const d = Math.max(Math.abs(x - p.x), Math.abs(z - p.z));
       if (d < minD || d > maxD || !this.spotFree(x, z)) continue;
-      r.phase = 'seg';
-      return { x, z, heading: Math.atan2(dx, dz) };
+      this.setEdge(r, e, dir, i);
+      return { x, z, heading: Math.atan2(path[i * 2] - path[i * 2 - 2], path[i * 2 + 1] - path[i * 2 - 1]) };
     }
     return null;
   }
 
   private spawnTraffic(initial: boolean, reuse?: Vehicle) {
     const r: Route = reuse?.ai ?? this.newRoute();
-    const s = this.pickSpawn(initial ? 20 : 110, initial ? 240 : 270, r);
+    const s = this.pickSpawn(initial ? 25 : 110, initial ? 420 : 300, r);
     if (!s) return;
     const kinds: VehicleKind[] = ['prius', 'prius', 'prius', 'prius', 'alphard', 'alphard', 'alphard', 'taxi', 'taxi', 'ambulance', 'firetruck'];
     const v = reuse ?? this.game.addVehicle(kinds[Math.floor(Math.random() * kinds.length)], s.x, s.z, s.heading);
     v.place(s.x, s.z, s.heading);
+    v.settle(this.game.city);
     v.ai = r;
     v.driver = 'ai';
     v.health = 100;
@@ -171,7 +120,7 @@ export class Traffic {
   // ------------------------------------------------------------------ police
   spawnPolice() {
     const r = this.newRoute();
-    const s = this.pickSpawn(90, 190, r);
+    const s = this.pickSpawn(90, 220, r);
     if (!s) return null;
     const v = this.game.addVehicle('police', s.x, s.z, s.heading);
     v.ai = r;
@@ -182,26 +131,33 @@ export class Traffic {
   /** Cops give up: they turn into ordinary traffic and get removed once far away. */
   standDown() {
     for (const v of this.police) {
+      if (v.driver !== 'police') continue;
       v.driver = 'ai';
       (v.ai as Route).direct = false;
-      (v.ai as Route).cruise = 11;
       this.reanchor(v, null);
     }
   }
+  /** Rejoin the road network from wherever the car is. */
   private reanchor(v: Vehicle, chase: { x: number; z: number } | null) {
-    const r = v.ai as Route;
-    const i = nearestRoad(v.pos.x), j = nearestRoad(v.pos.z);
-    r.bi = i;
-    r.bj = j;
-    r.dx = 0;
-    r.dz = 0;
-    this.advance(r, chase);
+    const r = v.ai as Route, city = this.game.city;
+    const h = city.nearestRoad(v.pos.x, v.pos.z, (e) => e.ai, 300);
+    if (!h) return;
+    const e = h.edge;
+    // face whichever way is closer to the current heading (or to the suspect)
+    const along = Math.sin(v.heading) * h.dx + Math.cos(v.heading) * h.dz;
+    let dir: 1 | -1 = e.oneway || along >= 0 ? 1 : -1;
+    if (chase && !e.oneway) {
+      const d = city.data.nodes;
+      dir = Math.hypot(d[e.b * 2] - chase.x, d[e.b * 2 + 1] - chase.z) < Math.hypot(d[e.a * 2] - chase.x, d[e.a * 2 + 1] - chase.z) ? 1 : -1;
+    }
+    const n = e.pts.length / 2;
+    this.setEdge(r, e, dir, clamp(dir > 0 ? h.seg + 1 : n - 1 - h.seg, 1, n - 1));
   }
   lineOfSight(ax: number, az: number, bx: number, bz: number) {
-    const w = this.game.city.collision;
+    const city = this.game.city, w = city.collision;
     for (let k = 1; k < 10; k++) {
-      const t = k / 10;
-      if (w.pointBlocked(ax + (bx - ax) * t, 1, az + (bz - az) * t, 1.2)) return false;
+      const t = k / 10, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+      if (w.pointBlocked(x, city.groundHeight(x, z) + 1, z, 1.2)) return false;
     }
     return true;
   }
@@ -210,11 +166,6 @@ export class Traffic {
   update(dt: number) {
     const g = this.game, p = g.player;
     this.time += dt;
-    if ((this.lampTick -= dt) <= 0) {
-      this.lampTick = 0.25;
-      this.updateLamps();
-    }
-
     let aiCount = 0;
     for (const v of g.vehicles) {
       if (v.driver === 'ai') {
@@ -239,10 +190,11 @@ export class Traffic {
           }
           continue;
         }
-        if (v.driver === 'ai' && far > 300 && recycled < 3) {
+        const gone = (v.ai as Route).deadEnd && far > 90;
+        if (v.driver === 'ai' && (far > 330 || gone) && recycled < 3) {
           this.spawnTraffic(false, v);
           recycled++;
-        } else if (v.driver === 'none' && far > 260 && aiCount < AI_COUNT && recycled < 3) {
+        } else if (v.driver === 'none' && far > 280 && aiCount < AI_COUNT && recycled < 3) {
           this.spawnTraffic(false, v);
           aiCount++;
           recycled++;
@@ -268,7 +220,7 @@ export class Traffic {
         r.direct = false;
         this.reanchor(v, chase);
       }
-      target = 19 + g.wanted.level * 2.5;
+      target = 18 + g.wanted.level * 2.5;
     }
 
     if (chase && r.direct) {
@@ -278,46 +230,60 @@ export class Traffic {
       const playerSpeed = g.player.vehicle ? Math.abs(g.player.vehicle.speed) : g.player.speed;
       // close in hard, but do not plough through a stopped or walking suspect
       if (dist < 16 && playerSpeed < 9) target = dist < 5.5 ? 0 : 5;
-    } else if (r.phase === 'turn') {
-      tx = r.sx;
-      tz = r.sz;
-      target = Math.min(target, chase ? 9 : 5.5);
-      if ((px - r.sx) * r.dx + (pz - r.sz) * r.dz > -2) r.phase = 'seg';
     } else {
-      const s = (px - r.sx) * r.dx + (pz - r.sz) * r.dz;
-      const look = Math.min(s + 7 + vf * 0.3, r.len + 1);
-      tx = r.sx + r.dx * look;
-      tz = r.sz + r.dz * look;
-      const toEnd = r.len - s;
-      if (toEnd < 0.8) {
-        this.advance(r, chase);
-        tx = r.sx;
-        tz = r.sz;
-      } else if (!chase && r.panicT <= 0) {
-        const state = this.light(r.bi, r.bj, r.dz !== 0);
-        const stopDist = (vf * vf) / 14 + 2.5;
-        if (state === 2 && toEnd < stopDist + 3) target = 0;
-        else if (state === 1 && toEnd < stopDist + 3 && toEnd > stopDist - 1) target = 0;
-        else if (toEnd < 12) target = Math.min(target, 8);
-      } else if (toEnd < 14) target = Math.min(target, 10);
+      // advance along the lane: move on once the current point is reached or passed
+      for (let guard = 0; guard < 4; guard++) {
+        const path = r.path, n = path.length / 2;
+        if (r.i >= n) {
+          this.advance(r, chase, v.heading);
+          if (r.deadEnd && r.edge.oneway) break;
+          continue;
+        }
+        const qx = path[r.i * 2], qz = path[r.i * 2 + 1];
+        const j = Math.max(0, r.i - 1);
+        const sx = qx - path[j * 2], sz = qz - path[j * 2 + 1];
+        const passed = r.i > 0 && (px - qx) * sx + (pz - qz) * sz > 0;
+        if (passed || (px - qx) ** 2 + (pz - qz) ** 2 < 16) r.i++;
+        else break;
+      }
+      const last = r.path.length / 2 - 1;
+      const i = Math.min(r.i, last);
+      tx = r.path[i * 2];
+      tz = r.path[i * 2 + 1];
+      // slow for the junction at the end of the edge, and give way to crossing traffic already nearer to it
+      const ex = r.path[last * 2], ez = r.path[last * 2 + 1];
+      const toEnd = Math.hypot(ex - px, ez - pz);
+      if (toEnd < 16) {
+        target = Math.min(target, chase ? 11 : 7);
+        if (r.deadEnd && r.edge.oneway && toEnd < 6) target = 0;
+        if (!chase && r.ignoreT <= 0 && toEnd > 4) {
+          for (const o of g.vehicles) {
+            if (o === v || o.driver === 'none') continue;
+            const od = Math.hypot(o.pos.x - ex, o.pos.z - ez);
+            if (od > 15 || od >= toEnd || Math.abs(o.speed) < 1.5) continue;
+            if (Math.abs(angleDiff(o.heading, v.heading)) > 0.7) { target = 0; break; }
+          }
+        }
+      }
     }
 
     // obstacle look-ahead (other vehicles, the player, pedestrians)
     if (r.ignoreT > 0) r.ignoreT -= dt;
     if (r.panicT > 0) {
       r.panicT -= dt;
-      target = Math.max(target, 17);
+      target = Math.max(target, 15);
     }
     if (!chase && r.ignoreT <= 0) {
       const reach = 5.5 + Math.max(0, vf) * 0.9;
-      let blocked = false;
-      for (const o of g.vehicles) {
-        if (o === v) continue;
-        const rx = o.pos.x - px, rz = o.pos.z - pz;
-        const fd = rx * fx + rz * fz;
-        if (fd <= 0 || fd > reach + 2.5) continue;
-        if (Math.abs(rx * fz - rz * fx) < 1.9) { blocked = true; break; }
-      }
+      let blocked = target === 0;
+      if (!blocked)
+        for (const o of g.vehicles) {
+          if (o === v) continue;
+          const rx = o.pos.x - px, rz = o.pos.z - pz;
+          const fd = rx * fx + rz * fz;
+          if (fd <= 0 || fd > reach + 2.5) continue;
+          if (Math.abs(rx * fz - rz * fx) < 1.9) { blocked = true; break; }
+        }
       if (!blocked && !g.player.vehicle && !g.player.inHeli) blocked = this.ahead(g.player.pos.x - px, g.player.pos.z - pz, fx, fz, reach);
       if (!blocked) for (const ped of g.peds.list) {
         if (ped.state !== 'down' && this.ahead(ped.pos.x - px, ped.pos.z - pz, fx, fz, reach)) { blocked = true; break; }
@@ -325,33 +291,31 @@ export class Traffic {
       if (blocked) {
         target = 0;
         r.blockedT += dt;
-        if (r.blockedT > 6) { r.blockedT = 0; r.ignoreT = 2.2; }
+        if (r.blockedT > 5) { r.blockedT = 0; r.ignoreT = 2.4; }
         if (r.blockedT > 2.5 && (r.honkT -= dt) <= 0) {
           r.honkT = rand(3, 7);
           g.audio.horn(Math.hypot(px - g.player.pos.x, pz - g.player.pos.z));
         }
       } else r.blockedT = Math.max(0, r.blockedT - dt * 2);
-    } else if (r.ignoreT > 0) target = Math.min(target, 3);
+    } else if (r.ignoreT > 0) target = Math.min(target, 3.5);
 
     // steering towards the target point
     const want = Math.atan2(tx - px, tz - pz);
     const diff = angleDiff(want, v.heading);
     v.steer = clamp(diff * 2.4, -1, 1);
-    if (Math.abs(diff) > 0.7) target = Math.min(target, 7);
+    if (Math.abs(diff) > 0.7) target = Math.min(target, 6);
 
-    // police un-stick: back off when wedged against something
-    if (chase) {
-      if (r.reverseT > 0) {
-        r.reverseT -= dt;
-        v.throttle = -1;
-        v.steer = -v.steer;
-        return;
-      }
-      if (target > 1 && Math.abs(vf) < 1) {
-        r.stuckT += dt;
-        if (r.stuckT > 1.1) { r.stuckT = 0; r.reverseT = 1.2; }
-      } else r.stuckT = 0;
+    // un-stick: back off when wedged against something
+    if (r.reverseT > 0) {
+      r.reverseT -= dt;
+      v.throttle = -1;
+      v.steer = -v.steer;
+      return;
     }
+    if (target > 1 && Math.abs(vf) < 0.8) {
+      r.stuckT += dt;
+      if (r.stuckT > (chase ? 1.1 : 2.5)) { r.stuckT = 0; r.reverseT = 1.2; }
+    } else r.stuckT = 0;
 
     if (target <= 0.01) {
       v.throttle = vf > 0.4 ? -1 : 0;

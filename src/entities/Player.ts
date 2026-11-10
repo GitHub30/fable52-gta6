@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Character } from './Character';
 import { Input } from '../core/Input';
 import { City } from '../world/City';
-import { WORLD_BOUND, clamp, angleDiff } from '../config';
+import { BOUND, clamp, angleDiff } from '../config';
 import type { Vehicle } from './Vehicle';
 
 const WALK = 4.2, RUN = 7.6, JUMP = 6.8, GRAVITY = 21, RADIUS = 0.38;
@@ -65,8 +65,8 @@ export class Player {
       const vn = this.vel.x * push.x + this.vel.z * push.z;
       if (vn < 0) { this.vel.x -= push.x * vn; this.vel.z -= push.z * vn; }
     }
-    this.pos.x = clamp(this.pos.x, -WORLD_BOUND, WORLD_BOUND);
-    this.pos.z = clamp(this.pos.z, -WORLD_BOUND, WORLD_BOUND);
+    this.pos.x = clamp(this.pos.x, -BOUND.x, BOUND.x);
+    this.pos.z = clamp(this.pos.z, -BOUND.z, BOUND.z);
 
     const ground = city.groundHeight(this.pos.x, this.pos.z);
     if (this.pos.y <= ground) {

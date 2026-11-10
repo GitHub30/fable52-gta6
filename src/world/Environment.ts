@@ -166,8 +166,8 @@ export class Environment {
     this.hemi.groundColor.setRGB(0.6, 0.57, 0.52).multiplyScalar(lerp(0.55, 1, this.day));
 
     this.fog.color.copy(this.hor);
-    this.fog.near = lerp(140, 12, this.fogAmt);
-    this.fog.far = lerp(1100, 170, this.fogAmt);
+    this.fog.near = lerp(350, 12, this.fogAmt);
+    this.fog.far = lerp(2600, 170, this.fogAmt);
 
     this.sky.position.copy(camera.position);
 

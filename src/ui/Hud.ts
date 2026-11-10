@@ -1,5 +1,4 @@
-import { City, DISTRICT_MAP_COLOR } from '../world/City';
-import { N, BLOCK, ROAD, CITY_EDGE, WORLD_BOUND, roadCoord, blockIndex } from '../config';
+import { City } from '../world/City';
 
 export interface HudState {
   money: number;
@@ -73,6 +72,7 @@ export class Hud {
   private fade = el('div', 'fade');
   private hudRoot = el('div');
   private last: Partial<HudState> = {};
+  private mapImg = document.createElement('canvas');
   private promptText: string | null = null;
 
   constructor(root: HTMLElement, private city: City) {
@@ -87,6 +87,24 @@ export class Hud {
     this.hudRoot.append(this.cross, this.fps, tr, bl, this.br, this.objective, this.prompt, this.notes, this.bannerHost);
     root.append(this.fade, this.hudRoot, this.overlay);
     this.stars.innerHTML = '<span>★</span>'.repeat(5);
+    // minimap base: the aerial photo with the road network drawn over it
+    const d = city.data, mw = 1024, mh = Math.round((1024 * d.hz) / d.hx), k = mw / (2 * d.hx);
+    this.mapImg.width = mw;
+    this.mapImg.height = mh;
+    const mc = this.mapImg.getContext('2d')!;
+    mc.drawImage(d.ground, 0, 0, mw, mh);
+    mc.fillStyle = 'rgba(18,22,30,0.38)';
+    mc.fillRect(0, 0, mw, mh);
+    mc.lineCap = mc.lineJoin = 'round';
+    for (const pass of [0, 1])
+      for (const e of d.edges) {
+        if (e.k > 5 || (pass === 0) !== e.k > 2) continue;
+        mc.strokeStyle = e.k <= 2 ? 'rgba(255,255,255,0.92)' : 'rgba(225,228,232,0.55)';
+        mc.lineWidth = Math.max(1.4, e.w * k * (e.k <= 2 ? 1 : 0.8));
+        mc.beginPath();
+        for (let i = 0; i < e.pts.length; i += 2) mc[i ? 'lineTo' : 'moveTo']((e.pts[i] + d.hx) * k, (e.pts[i + 1] + d.hz) * k);
+        mc.stroke();
+      }
   }
 
   setVisible(v: boolean) {
@@ -155,7 +173,10 @@ export class Hud {
   }
 
   private controlsHtml() {
-    return '<div class="keys">' + CONTROLS.map(([k, v]) => `<div><b>${k}</b><span>${v}</span></div>`).join('') + '</div>';
+    return (
+      '<div class="keys">' + CONTROLS.map(([k, v]) => `<div><b>${k}</b><span>${v}</span></div>`).join('') + '</div>' +
+      '<div class="credits">地図データ © OpenStreetMap contributors ／ 航空写真・標高: 国土地理院（地理院タイル）</div>'
+    );
   }
   private button(label: string, alt: boolean, fn: () => void) {
     const b = el('button', 'btn' + (alt ? ' alt' : ''), label) as HTMLButtonElement;
@@ -164,7 +185,7 @@ export class Hud {
   }
 
   showMenu(hasSave: boolean, onNew: () => void, onContinue: () => void) {
-    const card = el('div', 'card', `<h1 class="title">VELA BAY</h1><div class="subtitle">OPEN WORLD SANDBOX</div>`);
+    const card = el('div', 'card', `<h1 class="title">VELA BAY</h1><div class="subtitle">OSAKA ・ 通天閣 / 天王寺</div>`);
     if (hasSave) card.append(this.button('つづきから', false, onContinue));
     card.append(this.button('ニューゲーム', hasSave, onNew));
     card.insertAdjacentHTML('beforeend', this.controlsHtml());
@@ -192,24 +213,14 @@ export class Hud {
     const ctx = this.ctx, S = 200, c = S / 2;
     const scale = zoom;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#1b6f8f';
+    ctx.fillStyle = '#10141c';
     ctx.fillRect(0, 0, S, S);
     ctx.translate(c, c);
     ctx.rotate(camYaw);
     ctx.scale(scale, scale);
     ctx.translate(-px, -pz);
-    const wb = WORLD_BOUND + 30;
-    ctx.fillStyle = '#d8c690';
-    ctx.fillRect(-wb, -wb, wb * 2, wb * 2);
-    ctx.fillStyle = '#3d4048';
-    ctx.fillRect(-CITY_EDGE, -CITY_EDGE, CITY_EDGE * 2, CITY_EDGE * 2);
-    const reach = Math.ceil(c / scale / (BLOCK + ROAD)) + 1;
-    const bi = blockIndex(px), bj = blockIndex(pz);
-    for (let i = Math.max(0, bi - reach); i <= Math.min(N - 1, bi + reach); i++)
-      for (let j = Math.max(0, bj - reach); j <= Math.min(N - 1, bj + reach); j++) {
-        ctx.fillStyle = DISTRICT_MAP_COLOR[this.city.districts[i][j]];
-        ctx.fillRect(roadCoord(i) + ROAD / 2, roadCoord(j) + ROAD / 2, BLOCK, BLOCK);
-      }
+    const { hx: mapHx, hz: mapHz } = this.city.data;
+    ctx.drawImage(this.mapImg, -mapHx, -mapHz, mapHx * 2, mapHz * 2);
     // blips are drawn in screen space so their size and shape stay constant
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const cs = Math.cos(camYaw), sn = Math.sin(camYaw);

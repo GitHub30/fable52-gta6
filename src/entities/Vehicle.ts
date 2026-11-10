@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeBoxes, carPaintMaterial, BoxPart } from '../core/geo';
 import { City } from '../world/City';
-import { WORLD_BOUND, clamp, damp } from '../config';
+import { BOUND, clamp, damp } from '../config';
 
 export type VehicleKind = 'prius' | 'alphard' | 'taxi' | 'police' | 'ambulance' | 'firetruck';
 export interface VehicleSpec {
@@ -237,6 +237,7 @@ export class Vehicle {
   impact = 0; // strongest hit this frame (m/s), read by effects/audio/damage
   ai: any = null; // owned by Traffic
   roll = 0;
+  pitch = 0;
   readonly radius: number;
 
   constructor(readonly kind: VehicleKind, color?: number) {
@@ -261,6 +262,17 @@ export class Vehicle {
     this.steerAngle = 0;
     this.sync();
   }
+  /** Nose-up/down angle of the ground under the car. */
+  private slope(city: City) {
+    const fx = Math.sin(this.heading) * 1.5, fz = Math.cos(this.heading) * 1.5;
+    return -Math.atan2(city.groundHeight(this.pos.x + fx, this.pos.z + fz) - city.groundHeight(this.pos.x - fx, this.pos.z - fz), 3);
+  }
+  /** Sit on the terrain immediately (after spawning or teleporting). */
+  settle(city: City) {
+    this.pos.y = city.groundHeight(this.pos.x, this.pos.z);
+    this.pitch = this.slope(city);
+    this.sync();
+  }
   /** Centre of collision circle i (0 = front, 1 = rear). */
   circle(i: number, out: { x: number; z: number }) {
     const o = (i === 0 ? 1 : -1) * this.spec.len * 0.27;
@@ -281,7 +293,7 @@ export class Vehicle {
     let vl = this.vx * sx + this.vz * sz;
 
     let thr = this.driver === 'none' || this.wrecked ? 0 : this.throttle;
-    const offroad = Math.abs(this.pos.x) > WORLD_BOUND - 46 || Math.abs(this.pos.z) > WORLD_BOUND - 46; // sand
+    const offroad = false;
     const maxSpeed = s.maxSpeed * (offroad ? 0.55 : 1) * (this.health < 30 ? 0.7 : 1);
     if (thr > 0) {
       if (vf < -0.5) vf += 22 * dt * thr; // braking out of reverse
@@ -326,20 +338,21 @@ export class Vehicle {
         }
       }
     }
-    if (Math.abs(this.pos.x) > WORLD_BOUND || Math.abs(this.pos.z) > WORLD_BOUND) {
-      this.pos.x = clamp(this.pos.x, -WORLD_BOUND, WORLD_BOUND);
-      this.pos.z = clamp(this.pos.z, -WORLD_BOUND, WORLD_BOUND);
+    if (Math.abs(this.pos.x) > BOUND.x || Math.abs(this.pos.z) > BOUND.z) {
+      this.pos.x = clamp(this.pos.x, -BOUND.x, BOUND.x);
+      this.pos.z = clamp(this.pos.z, -BOUND.z, BOUND.z);
       this.vx *= 0.5;
       this.vz *= 0.5;
     }
     this.pos.y = damp(this.pos.y, city.groundHeight(this.pos.x, this.pos.z), 14, dt);
+    this.pitch = damp(this.pitch, this.slope(city), 8, dt);
     this.roll = damp(this.roll, clamp(-this.steerAngle * vf * 0.012 + (slide > 2 ? Math.sign(vl) * 0.03 : 0), -0.09, 0.09), 6, dt);
     this.sync();
   }
 
   sync() {
     this.mesh.position.copy(this.pos);
-    this.mesh.rotation.set(0, this.heading, this.roll);
+    this.mesh.rotation.set(this.pitch, this.heading, this.roll);
   }
 
   damage(impact: number) {
