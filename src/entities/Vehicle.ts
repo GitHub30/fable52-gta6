@@ -3,25 +3,96 @@ import { mergeBoxes, carPaintMaterial, BoxPart } from '../core/geo';
 import { City } from '../world/City';
 import { WORLD_BOUND, clamp, damp } from '../config';
 
-export type VehicleKind = 'sedan' | 'sports' | 'van' | 'taxi' | 'police';
+export type VehicleKind = 'prius' | 'alphard' | 'taxi' | 'police';
 export interface VehicleSpec {
   name: string;
+  shape: 'prius' | 'alphard';
   len: number;
   wid: number;
-  body: number; // body height
-  cabin: number; // cabin height
   maxSpeed: number; // m/s
   accel: number;
   grip: number;
   colors: number[];
 }
+const PRIUS_COLORS = [0xd9dde2, 0xf4f4f2, 0x1b1c1f, 0x2a4f8f, 0x9a1c26, 0x7d868c, 0xe6c94a];
 export const SPECS: Record<VehicleKind, VehicleSpec> = {
-  sedan: { name: 'セダン', len: 4.5, wid: 1.9, body: 0.6, cabin: 0.5, maxSpeed: 34, accel: 9, grip: 7, colors: [0xb8bcc2, 0x2d3f66, 0x7a1f24, 0x1e1f22, 0xe8e4da, 0x3a6b52, 0x8a6d3b] },
-  sports: { name: 'スポーツカー', len: 4.3, wid: 1.95, body: 0.5, cabin: 0.38, maxSpeed: 52, accel: 15, grip: 8.5, colors: [0xff3b3b, 0xffc400, 0x19c5d6, 0xff5fa2, 0xf5f5f5, 0x7c3aed] },
-  van: { name: 'バン', len: 5.2, wid: 2.1, body: 0.8, cabin: 0.9, maxSpeed: 27, accel: 6.5, grip: 6, colors: [0xf0f0f0, 0x4a6fa5, 0x9a9a9a, 0xd9822b] },
-  taxi: { name: 'タクシー', len: 4.5, wid: 1.9, body: 0.6, cabin: 0.5, maxSpeed: 36, accel: 9.5, grip: 7, colors: [0xf7c21a] },
-  police: { name: 'パトカー', len: 4.6, wid: 1.95, body: 0.6, cabin: 0.5, maxSpeed: 46, accel: 13, grip: 8, colors: [0xf2f2f2] },
+  prius: { name: 'プリウス', shape: 'prius', len: 4.6, wid: 1.8, maxSpeed: 40, accel: 10.5, grip: 7.6, colors: PRIUS_COLORS },
+  alphard: { name: 'アルファード', shape: 'alphard', len: 5.0, wid: 1.9, maxSpeed: 34, accel: 8.2, grip: 6.6, colors: [0xf6f5f0, 0xf6f5f0, 0x17181b, 0xc4c8cc, 0x3b3f46] },
+  taxi: { name: 'プリウス タクシー', shape: 'prius', len: 4.6, wid: 1.8, maxSpeed: 38, accel: 10, grip: 7.4, colors: [0xf7c21a] },
+  police: { name: 'パトカー', shape: 'prius', len: 4.6, wid: 1.8, maxSpeed: 46, accel: 13, grip: 8, colors: [0xf2f2f2] },
 };
+
+const GLASS = 0x18222c, TRIM = 0x1b1d21, LAMP = 0xfff3cf, TAIL = 0xff1a1a;
+
+/** Low wedge-shaped liftback: sloping bonnet, steep windscreen, long fastback tail. Returns the roof height. */
+function priusParts(parts: BoxPart[], W: number, L: number, color: number, twoTone: boolean): number {
+  const h = L / 2;
+  const side = twoTone ? 0x15171a : color;
+  parts.push(
+    { size: [W, 0.5, L], pos: [0, 0.55, 0], color },
+    { size: [W + 0.02, 0.3, L * 0.36], pos: [0, 0.58, -0.2], color: side }, // door panel (black on patrol cars)
+    // bonnet slopes down to a low nose
+    { size: [W * 0.96, 0.12, 1.35], pos: [0, 0.84, h - 0.78], color, rot: [0.1, 0, 0] },
+    // cabin: glass core, raked windscreen, roof
+    { size: [W * 0.88, 0.5, 1.5], pos: [0, 1.05, -0.25], color: GLASS },
+    { size: [W * 0.86, 0.26, 0.5], pos: [0, 0.93, 0.7], color: GLASS },
+    { size: [W * 0.86, 0.07, 1.16], pos: [0, 1.07, 0.85], color: GLASS, rot: [0.48, 0, 0] },
+    { size: [W * 0.87, 0.07, 1.34], pos: [0, 1.335, -0.3], color },
+    { size: [W * 0.89, 0.5, 0.1], pos: [0, 1.05, -0.05], color }, // B pillar
+    // fastback: rear glass then a painted deck, both on the same slope
+    { size: [W * 0.85, 0.07, 0.78], pos: [0, 1.24, -1.3], color: GLASS, rot: [-0.258, 0, 0] },
+    { size: [W * 0.87, 0.07, 0.62], pos: [0, 1.065, -1.97], color, rot: [-0.258, 0, 0] },
+    { size: [W * 0.88, 0.32, 0.82], pos: [0, 0.95, -1.36], color },
+    { size: [W * 0.92, 0.2, 0.56], pos: [0, 0.88, -2.0], color },
+    // nose: slim lamps, dark lower intake
+    { size: [0.56, 0.07, 0.1], pos: [W / 2 - 0.36, 0.76, h + 0.01], color: LAMP, glow: 3 },
+    { size: [0.56, 0.07, 0.1], pos: [-W / 2 + 0.36, 0.76, h + 0.01], color: LAMP, glow: 3 },
+    { size: [W * 0.5, 0.04, 0.08], pos: [0, 0.74, h + 0.01], color: TRIM },
+    { size: [W * 0.78, 0.16, 0.08], pos: [0, 0.42, h + 0.01], color: TRIM },
+    // tail: full-width light bar over a black lower bumper
+    { size: [W * 0.92, 0.06, 0.08], pos: [0, 0.96, -h - 0.01], color: TAIL, glow: 1.6 },
+    { size: [W * 0.94, 0.1, 0.08], pos: [0, 0.89, -h - 0.01], color: TRIM },
+    { size: [W * 0.9, 0.2, 0.08], pos: [0, 0.42, -h - 0.01], color: TRIM },
+  );
+  return 1.37;
+}
+
+/** Tall boxy luxury minivan: upright nose with a huge grille, long flat roof, vertical tail. Returns the roof height. */
+function alphardParts(parts: BoxPart[], W: number, L: number, color: number): number {
+  const h = L / 2;
+  parts.push(
+    { size: [W, 0.78, L], pos: [0, 0.69, 0], color },
+    // glass band with painted pillars and roof
+    { size: [W * 0.94, 0.56, 3.9], pos: [0, 1.36, -0.45], color: GLASS },
+    { size: [W * 0.96, 0.56, 0.14], pos: [0, 1.36, 0.6], color },
+    { size: [W * 0.96, 0.56, 0.12], pos: [0, 1.36, -0.85], color: TRIM },
+    { size: [W * 0.96, 0.56, 0.16], pos: [0, 1.36, -2.34], color },
+    { size: [W * 0.97, 0.1, 3.96], pos: [0, 1.69, -0.45], color },
+    { size: [W * 0.9, 0.06, 0.34], pos: [0, 1.72, -2.52], color }, // roof spoiler
+    // short raked windscreen
+    { size: [W * 0.92, 0.07, 0.84], pos: [0, 1.36, 1.8], color: GLASS, rot: [0.8, 0, 0] },
+    { size: [W * 0.92, 0.3, 0.34], pos: [0, 1.22, 1.62], color: GLASS },
+    // the signature grille: tall dark panel with bright slats
+    { size: [W * 0.78, 0.66, 0.08], pos: [0, 0.72, h + 0.01], color: TRIM },
+    { size: [W * 0.76, 0.03, 0.1], pos: [0, 0.94, h + 0.02], color: 0xb9bec6 },
+    { size: [W * 0.76, 0.03, 0.1], pos: [0, 0.8, h + 0.02], color: 0xb9bec6 },
+    { size: [W * 0.76, 0.03, 0.1], pos: [0, 0.66, h + 0.02], color: 0xb9bec6 },
+    { size: [W * 0.76, 0.03, 0.1], pos: [0, 0.52, h + 0.02], color: 0xb9bec6 },
+    { size: [0.5, 0.08, 0.1], pos: [W / 2 - 0.27, 1.0, h + 0.01], color: LAMP, glow: 3 },
+    { size: [0.5, 0.08, 0.1], pos: [-W / 2 + 0.27, 1.0, h + 0.01], color: LAMP, glow: 3 },
+    { size: [0.07, 0.3, 0.1], pos: [W / 2 - 0.1, 0.62, h + 0.01], color: LAMP, glow: 2.5 },
+    { size: [0.07, 0.3, 0.1], pos: [-W / 2 + 0.1, 0.62, h + 0.01], color: LAMP, glow: 2.5 },
+    // tail: light bar with drooping ends, vertical reflectors
+    { size: [W * 0.96, 0.1, 0.08], pos: [0, 1.1, -h - 0.01], color: TAIL, glow: 1.6 },
+    { size: [0.1, 0.24, 0.08], pos: [W / 2 - 0.12, 0.98, -h - 0.01], color: TAIL, glow: 1.6 },
+    { size: [0.1, 0.24, 0.08], pos: [-W / 2 + 0.12, 0.98, -h - 0.01], color: TAIL, glow: 1.6 },
+    { size: [0.05, 0.26, 0.08], pos: [W / 2 - 0.14, 0.52, -h - 0.01], color: TAIL },
+    { size: [0.05, 0.26, 0.08], pos: [-W / 2 + 0.14, 0.52, -h - 0.01], color: TAIL },
+    { size: [W * 0.4, 0.14, 0.08], pos: [0, 0.98, -h - 0.01], color: TRIM },
+    { size: [W * 0.9, 0.04, 0.1], pos: [0, 0.36, -h - 0.02], color: 0xb9bec6 },
+  );
+  return 1.74;
+}
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 function vehicleGeometry(kind: VehicleKind, color: number) {
@@ -30,43 +101,22 @@ function vehicleGeometry(kind: VehicleKind, color: number) {
   if (g) return g;
   const s = SPECS[kind];
   const { len: L, wid: W } = s;
-  const y0 = 0.32; // ground clearance
-  const cabLen = kind === 'van' ? L * 0.72 : L * 0.5;
-  const cabZ = kind === 'van' ? -L * 0.1 : -L * 0.06;
-  const top = y0 + s.body + s.cabin;
-  const parts: BoxPart[] = [
-    { size: [W, s.body, L], pos: [0, y0 + s.body / 2, 0], color },
-    { size: [W * 0.86, s.cabin, cabLen], pos: [0, y0 + s.body + s.cabin / 2, cabZ], color: 0x18222c },
-    { size: [W * 0.88, 0.07, cabLen * 0.94], pos: [0, top + 0.035, cabZ], color },
-    // pillars so the cabin does not read as a black brick
-    { size: [W * 0.89, s.cabin, 0.12], pos: [0, y0 + s.body + s.cabin / 2, cabZ + cabLen / 2 - 0.5], color: kind === 'police' ? 0x15171a : color },
-    { size: [W * 0.89, s.cabin, 0.12], pos: [0, y0 + s.body + s.cabin / 2, cabZ - cabLen / 2 + 0.4], color: kind === 'police' ? 0x15171a : color },
-    // bumpers and lamps
-    { size: [W + 0.06, 0.2, 0.2], pos: [0, y0 + 0.14, L / 2], color: 0x202226 },
-    { size: [W + 0.06, 0.2, 0.2], pos: [0, y0 + 0.14, -L / 2], color: 0x202226 },
-    { size: [0.42, 0.16, 0.08], pos: [W / 2 - 0.3, y0 + s.body - 0.16, L / 2 + 0.01], color: 0xfff3cf, glow: 3 },
-    { size: [0.42, 0.16, 0.08], pos: [-W / 2 + 0.3, y0 + s.body - 0.16, L / 2 + 0.01], color: 0xfff3cf, glow: 3 },
-    { size: [0.42, 0.14, 0.08], pos: [W / 2 - 0.3, y0 + s.body - 0.16, -L / 2 - 0.01], color: 0xff1a1a, glow: 1.5 },
-    { size: [0.42, 0.14, 0.08], pos: [-W / 2 + 0.3, y0 + s.body - 0.16, -L / 2 - 0.01], color: 0xff1a1a, glow: 1.5 },
-  ];
+  const parts: BoxPart[] = [];
+  const top = s.shape === 'prius' ? priusParts(parts, W, L, color, kind === 'police') : alphardParts(parts, W, L, color);
+  // wheels: four boxes fanned through 90 degrees read as a round tyre, plus a hub
+  const r = s.shape === 'alphard' ? 0.56 : 0.52;
   for (const sx of [-1, 1])
     for (const sz of [-1, 1]) {
-      const p: [number, number, number] = [sx * (W / 2 - 0.1), 0.34, sz * L * 0.31];
-      parts.push({ size: [0.26, 0.5, 0.5], pos: p, color: 0x0e0e10 });
-      parts.push({ size: [0.26, 0.5, 0.5], pos: p, color: 0x0e0e10, rot: [Math.PI / 4, 0, 0] });
-      parts.push({ size: [0.28, 0.26, 0.26], pos: p, color: 0x9a9da3 });
+      const at: [number, number, number] = [sx * (W / 2 - 0.1), r * 0.66, sz * L * 0.3];
+      for (let k = 0; k < 4; k++) parts.push({ size: [0.26, r, r], pos: at, color: 0x0e0e10, rot: [(k * Math.PI) / 8, 0, 0] });
+      parts.push({ size: [0.28, r * 0.52, r * 0.52], pos: at, color: 0x9a9da3 });
     }
   if (kind === 'police') {
-    parts.push({ size: [W + 0.02, s.body * 0.55, L * 0.34], pos: [0, y0 + s.body * 0.5, 0], color: 0x15171a });
-    parts.push({ size: [0.5, 0.14, 0.26], pos: [0.3, top + 0.14, cabZ], color: 0x2a5cff, glow: 4 });
-    parts.push({ size: [0.5, 0.14, 0.26], pos: [-0.3, top + 0.14, cabZ], color: 0xff2020, glow: 4 });
+    parts.push({ size: [0.5, 0.14, 0.26], pos: [0.3, top + 0.1, -0.3], color: 0x2a5cff, glow: 4 });
+    parts.push({ size: [0.5, 0.14, 0.26], pos: [-0.3, top + 0.1, -0.3], color: 0xff2020, glow: 4 });
   } else if (kind === 'taxi') {
-    parts.push({ size: [0.6, 0.18, 0.24], pos: [0, top + 0.16, cabZ], color: 0xfff7c2, glow: 2 });
-    parts.push({ size: [W + 0.02, 0.12, L * 0.5], pos: [0, y0 + s.body * 0.5, 0], color: 0x1b1b1b });
-  } else if (kind === 'sports') {
-    parts.push({ size: [W * 0.9, 0.06, 0.34], pos: [0, y0 + s.body + 0.22, -L / 2 + 0.2], color: 0x18181b });
-    parts.push({ size: [0.08, 0.2, 0.2], pos: [W * 0.36, y0 + s.body + 0.1, -L / 2 + 0.2], color: 0x18181b });
-    parts.push({ size: [0.08, 0.2, 0.2], pos: [-W * 0.36, y0 + s.body + 0.1, -L / 2 + 0.2], color: 0x18181b });
+    parts.push({ size: [0.6, 0.18, 0.24], pos: [0, top + 0.12, -0.3], color: 0xfff7c2, glow: 2 });
+    parts.push({ size: [W + 0.02, 0.1, L * 0.5], pos: [0, 0.6, 0], color: 0x1b1b1b });
   }
   g = mergeBoxes(parts);
   geoCache.set(key, g);

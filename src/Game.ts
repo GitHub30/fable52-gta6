@@ -133,7 +133,7 @@ export class Game {
 
   private spawnParkedCars() {
     const rng = mulberry32(777);
-    const kinds: VehicleKind[] = ['sedan', 'sedan', 'sedan', 'sports', 'van', 'taxi'];
+    const kinds: VehicleKind[] = ['prius', 'prius', 'prius', 'alphard', 'alphard', 'taxi'];
     for (let n = 0; n < 80; n++) {
       const alongZ = rng() < 0.5;
       const line = roadCoord(Math.floor(rng() * (N + 1)));
@@ -146,7 +146,7 @@ export class Game {
       else this.addVehicle(kind, along, line + side * PARK_OFFSET, side > 0 ? Math.PI / 2 : -Math.PI / 2);
     }
     // a guaranteed starter car next to the spawn point
-    this.addVehicle('sports', roadCoord(6) + PARK_OFFSET, roadCoord(6) + 26, Math.PI, 0xff3b6b);
+    this.addVehicle('prius', roadCoord(6) + PARK_OFFSET, roadCoord(6) + 26, Math.PI, 0xd9dde2);
   }
 
   resetPlayer(x?: number, z?: number, heading = Math.PI) {

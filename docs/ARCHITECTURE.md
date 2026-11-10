@@ -78,7 +78,7 @@ src/
 | やりたいこと | 触る場所 |
 |---|---|
 | ミッション追加 | `Missions.ts` の `defs` に 1 件追加（`goto` / `evade` の目標列） |
-| 車種追加 | `Vehicle.ts` の `SPECS` と `vehicleGeometry` |
+| 車種追加 | `Vehicle.ts` の `SPECS` と、車体形状を返す `priusParts` / `alphardParts` のような関数 |
 | 地区・建物の見た目 | `City.ts` の地区判定とブロック生成 |
 | 新しい犯罪・手配ルール | `Game.ts` の該当イベントから `wanted.crime(min, cap, 理由)` |
 | 武器追加 | `Game.ts` の `shoot()`（ヒットスキャンと照準補正）と `weapon` の種類 |
