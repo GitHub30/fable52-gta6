@@ -554,7 +554,7 @@ export class Game {
       district: this.city.districtName(p.pos.x, p.pos.z),
       speedKmh: car ? Math.round(Math.abs(car.speed) * 3.6) : this.heli ? Math.round(this.heli.airspeed * 3.6) : null,
       carHealth: car ? Math.round(car.health) : this.heli ? Math.round(this.heli.health) : 0,
-      carName: car ? car.spec.name : this.heli ? 'ヘリコプター  高度 ' + Math.round(this.heli.pos.y) + 'm' : '',
+      carName: car ? car.spec.name : this.heli ? 'UH-60J  高度 ' + Math.round(this.heli.pos.y) + 'm' : '',
       objective: m.objectiveText,
       timer: m.active ? Math.ceil(m.active.timeLeft) : null,
       fps: this.fps,

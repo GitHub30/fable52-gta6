@@ -93,6 +93,21 @@ export function badge(unit: string, color: string): Draw {
   };
 }
 
+/** Hinomaru: red disc with a thin white outline. */
+export function roundel(): Draw {
+  return (ctx, w, h) => {
+    const r = Math.min(w, h) / 2;
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, r * 0.96, 0, Math.PI * 2);
+    ctx.fillStyle = '#f4f4f1';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, r * 0.84, 0, Math.PI * 2);
+    ctx.fillStyle = '#c8102e';
+    ctx.fill();
+  };
+}
+
 const AXES: Record<Face, { n: [number, number, number]; r: [number, number, number] }> = {
   // r = up x n: the viewer's right-hand direction when facing the surface from outside
   '+x': { n: [1, 0, 0], r: [0, 0, -1] },

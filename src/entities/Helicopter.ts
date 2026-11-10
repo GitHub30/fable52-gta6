@@ -3,14 +3,16 @@ import { mergeBoxes, carPaintMaterial } from '../core/geo';
 import { Input } from '../core/Input';
 import { City } from '../world/City';
 import { BOUND, clamp, damp } from '../config';
+import { buildLivery } from './Livery';
+import { uh60jBody, uh60jRotor, uh60jTailRotor, uh60jLivery, ROTOR_AT, TAIL_ROTOR_AT } from './Uh60j';
 
 const push = { x: 0, z: 0 };
-const BODY = 0x2d6cdf, WHITE = 0xf2f2f2, DARK = 0x1b1d21, GLASS = 0x18222c;
 let bodyGeo: THREE.BufferGeometry | null = null;
 let rotorGeo: THREE.BufferGeometry | null = null;
 let tailGeo: THREE.BufferGeometry | null = null;
+let livery: THREE.Mesh | null = null;
 
-/** Flyable helicopter: W/S fly forward/back, A/D turn, Space climb, Shift descend. Lands on streets and rooftops. */
+/** Flyable JASDF UH-60J: W/S fly forward/back, A/D turn, Space climb, Shift descend. Lands on streets and rooftops. */
 export class Helicopter {
   readonly group = new THREE.Group();
   readonly pos = new THREE.Vector3();
@@ -29,39 +31,18 @@ export class Helicopter {
   readonly radius = 2.1;
 
   constructor(readonly home: { x: number; z: number; heading: number }, private city: City) {
-    bodyGeo ??= mergeBoxes([
-      { size: [1.7, 1.5, 2.7], pos: [0, 1.3, 0.3], color: BODY },
-      { size: [1.72, 0.3, 2.72], pos: [0, 1.0, 0.3], color: WHITE },
-      { size: [1.5, 1.0, 0.9], pos: [0, 1.25, 1.85], color: GLASS },
-      { size: [1.3, 0.5, 0.5], pos: [0, 0.85, 2.2], color: BODY },
-      { size: [1.74, 0.6, 0.9], pos: [0, 1.55, 0.6], color: GLASS }, // side windows
-      { size: [1.0, 0.4, 1.5], pos: [0, 2.2, 0.1], color: WHITE }, // engine housing
-      { size: [0.16, 0.36, 0.16], pos: [0, 2.55, 0.1], color: DARK }, // mast
-      { size: [0.36, 0.36, 3.7], pos: [0, 1.55, -2.85], color: BODY }, // tail boom
-      { size: [0.12, 1.2, 0.7], pos: [0, 2.0, -4.5], color: WHITE }, // fin
-      { size: [1.3, 0.08, 0.5], pos: [0, 1.6, -4.3], color: BODY }, // stabiliser
-      { size: [0.12, 0.1, 3.0], pos: [0.85, 0.05, 0.3], color: DARK }, // skids
-      { size: [0.12, 0.1, 3.0], pos: [-0.85, 0.05, 0.3], color: DARK },
-      { size: [0.08, 0.55, 0.08], pos: [0.85, 0.32, 1.1], color: DARK },
-      { size: [0.08, 0.55, 0.08], pos: [-0.85, 0.32, 1.1], color: DARK },
-      { size: [0.08, 0.55, 0.08], pos: [0.85, 0.32, -0.5], color: DARK },
-      { size: [0.08, 0.55, 0.08], pos: [-0.85, 0.32, -0.5], color: DARK },
-    ]);
-    rotorGeo ??= mergeBoxes([
-      { size: [9.6, 0.06, 0.34], pos: [0, 0, 0], color: DARK },
-      { size: [0.34, 0.06, 9.6], pos: [0, 0, 0], color: DARK },
-    ]);
-    tailGeo ??= mergeBoxes([
-      { size: [0.05, 1.5, 0.16], pos: [0, 0, 0], color: DARK },
-      { size: [0.05, 0.16, 1.5], pos: [0, 0, 0], color: DARK },
-    ]);
+    bodyGeo ??= mergeBoxes(uh60jBody());
+    rotorGeo ??= mergeBoxes(uh60jRotor());
+    tailGeo ??= mergeBoxes(uh60jTailRotor());
+    livery ??= buildLivery(uh60jLivery());
     const body = new THREE.Mesh(bodyGeo, carPaintMaterial);
     this.rotor = new THREE.Mesh(rotorGeo, carPaintMaterial);
-    this.rotor.position.set(0, 2.75, 0.1);
+    this.rotor.position.set(...ROTOR_AT);
     this.tailRotor = new THREE.Mesh(tailGeo, carPaintMaterial);
-    this.tailRotor.position.set(0.16, 2.0, -4.5);
+    this.tailRotor.position.set(...TAIL_ROTOR_AT);
     this.group.add(body, this.rotor, this.tailRotor);
     this.group.traverse((m) => ((m as THREE.Mesh).castShadow = true));
+    this.group.add(livery.clone()); // lettering: added after the shadow pass so it casts none
     this.group.rotation.order = 'YXZ';
     this.reset();
   }
