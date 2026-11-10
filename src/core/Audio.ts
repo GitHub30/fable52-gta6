@@ -1,4 +1,13 @@
-/** Fully procedural WebAudio: engine, siren, rain, SFX and a small synth radio. No asset files. */
+export type SirenKind = 'police' | 'ambulance' | 'firetruck';
+const SIREN_FILES: Record<SirenKind, string> = { police: 'police.m4a', ambulance: 'ambulance.m4a', firetruck: 'fire-engine.m4a' };
+const SIREN_KINDS = Object.keys(SIREN_FILES) as SirenKind[];
+interface Siren {
+  buf: AudioBuffer | null;
+  gain: GainNode;
+  src: AudioBufferSourceNode | null;
+}
+
+/** WebAudio: procedural engine, rain, SFX and synth radio, plus recorded siren loops from public/sirens. */
 export class GameAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -6,8 +15,7 @@ export class GameAudio {
   private engineOsc2!: OscillatorNode;
   private engineGain!: GainNode;
   private engineFilter!: BiquadFilterNode;
-  private sirenOsc!: OscillatorNode;
-  private sirenGain!: GainNode;
+  private sirens = {} as Record<SirenKind, Siren>;
   private rainGain!: GainNode;
   private noiseBuf!: AudioBuffer;
   private radioGain!: GainNode;
@@ -47,15 +55,18 @@ export class GameAudio {
       this.engineOsc.start();
       this.engineOsc2.start();
 
-      this.sirenOsc = ctx.createOscillator();
-      this.sirenOsc.type = 'square';
-      this.sirenGain = ctx.createGain();
-      this.sirenGain.gain.value = 0;
-      const sf = ctx.createBiquadFilter();
-      sf.type = 'bandpass';
-      sf.frequency.value = 900;
-      this.sirenOsc.connect(sf).connect(this.sirenGain).connect(this.master);
-      this.sirenOsc.start();
+      for (const kind of SIREN_KINDS) {
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        gain.connect(this.master);
+        const siren: Siren = (this.sirens[kind] = { buf: null, gain, src: null });
+        // a missing or undecodable file just leaves that siren silent
+        fetch(new URL('sirens/' + SIREN_FILES[kind], document.baseURI).href)
+          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.statusText))))
+          .then((data) => ctx.decodeAudioData(data))
+          .then((buf) => (siren.buf = buf))
+          .catch(() => {});
+      }
 
       const rain = ctx.createBufferSource();
       rain.buffer = this.noiseBuf;
@@ -83,7 +94,7 @@ export class GameAudio {
   }
 
   /** Per-frame continuous sounds. */
-  update(inCar: boolean, speed: number, throttle: number, sirenDist: number, rain: number) {
+  update(inCar: boolean, speed: number, throttle: number, sirenLevel: Record<SirenKind, number>, rain: number) {
     const ctx = this.ctx;
     if (!ctx) return;
     const t = ctx.currentTime;
@@ -93,9 +104,22 @@ export class GameAudio {
     this.engineFilter.frequency.setTargetAtTime(300 + Math.abs(speed) * 22, t, 0.1);
     this.engineGain.gain.setTargetAtTime(inCar ? 0.1 + Math.abs(throttle) * 0.05 : 0, t, 0.1);
 
-    const siren = sirenDist < 160 ? (1 - sirenDist / 160) * 0.12 : 0;
-    this.sirenGain.gain.setTargetAtTime(siren, t, 0.2);
-    if (siren > 0) this.sirenOsc.frequency.setTargetAtTime(Math.floor(t * 1.6) % 2 ? 960 : 720, t, 0.04);
+    // sirens: each loop starts from its beginning when it becomes audible and stops once faded out
+    for (const kind of SIREN_KINDS) {
+      const sn = this.sirens[kind], level = sirenLevel[kind];
+      sn.gain.gain.setTargetAtTime(level * 0.6, t, 0.15);
+      if (level > 0 && !sn.src && sn.buf) {
+        sn.src = ctx.createBufferSource();
+        sn.src.buffer = sn.buf;
+        sn.src.loop = true;
+        sn.src.connect(sn.gain);
+        sn.src.start();
+      } else if (level <= 0 && sn.src && sn.gain.gain.value < 0.004) {
+        sn.src.stop();
+        sn.src.disconnect();
+        sn.src = null;
+      }
+    }
     this.rainGain.gain.setTargetAtTime(rain * 0.11, t, 0.5);
 
     // radio: only audible while driving

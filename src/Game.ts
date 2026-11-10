@@ -516,8 +516,14 @@ export class Game {
     const ride = this.heli;
     this.rig.update(dt, input, p.pos, car ? car.heading : ride ? ride.heading : null, car ? car.speed : ride ? ride.airspeed : p.speed, this.city.collision);
     this.updateHeadlight(car);
-    let siren = Infinity;
-    for (const v of this.traffic.police) if (v.driver === 'police') siren = Math.min(siren, Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z));
+    // sirens: pursuing patrol cars by distance; the ambulance and fire engine only while the player drives them
+    let policeDist = Infinity;
+    for (const v of this.traffic.police) if (v.driver === 'police') policeDist = Math.min(policeDist, Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z));
+    const siren = {
+      police: policeDist < 160 ? 1 - policeDist / 160 : 0,
+      ambulance: car && car.kind === 'ambulance' && !car.wrecked ? 1 : 0,
+      firetruck: car && car.kind === 'firetruck' && !car.wrecked ? 1 : 0,
+    };
     this.audio.update(!!car || !!ride, car ? car.speed : ride ? ride.spin * (16 + ride.airspeed * 0.4) : 0, car ? car.throttle : ride ? ride.spin : 0, siren, this.env.rain);
 
     this.updateHud(near, car);
