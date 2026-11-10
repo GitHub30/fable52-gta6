@@ -7,6 +7,8 @@ export interface BoxPart {
   rot?: [number, number, number];
   /** >1 multiplies the vertex colour so the part stays bright at night (lamps). */
   glow?: number;
+  /** Render as a cylinder lying along X: size = [width, diameter, diameter]. Used for wheels. */
+  cyl?: boolean;
 }
 
 /** Merge coloured boxes into a single vertex-coloured geometry (one draw call). */
@@ -16,7 +18,9 @@ export function mergeBoxes(parts: BoxPart[]): THREE.BufferGeometry {
   const e = new THREE.Euler();
   const m = new THREE.Matrix4();
   for (const p of parts) {
-    const g = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
+    const g: THREE.BufferGeometry = p.cyl
+      ? new THREE.CylinderGeometry(p.size[1] / 2, p.size[1] / 2, p.size[0], 16).rotateZ(Math.PI / 2)
+      : new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
     if (p.rot) g.applyMatrix4(m.makeRotationFromEuler(e.set(p.rot[0], p.rot[1], p.rot[2])));
     g.translate(p.pos[0], p.pos[1], p.pos[2]);
     const base = pos.length / 3;

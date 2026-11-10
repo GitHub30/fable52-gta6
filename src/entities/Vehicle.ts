@@ -103,13 +103,13 @@ function vehicleGeometry(kind: VehicleKind, color: number) {
   const { len: L, wid: W } = s;
   const parts: BoxPart[] = [];
   const top = s.shape === 'prius' ? priusParts(parts, W, L, color, kind === 'police') : alphardParts(parts, W, L, color);
-  // wheels: four boxes fanned through 90 degrees read as a round tyre, plus a hub
-  const r = s.shape === 'alphard' ? 0.56 : 0.52;
+  // wheels: a tyre cylinder with a slightly wider hub so the rim shows from the side
+  const d = s.shape === 'alphard' ? 0.74 : 0.68;
   for (const sx of [-1, 1])
     for (const sz of [-1, 1]) {
-      const at: [number, number, number] = [sx * (W / 2 - 0.1), r * 0.66, sz * L * 0.3];
-      for (let k = 0; k < 4; k++) parts.push({ size: [0.26, r, r], pos: at, color: 0x0e0e10, rot: [(k * Math.PI) / 8, 0, 0] });
-      parts.push({ size: [0.28, r * 0.52, r * 0.52], pos: at, color: 0x9a9da3 });
+      const at: [number, number, number] = [sx * (W / 2 - 0.1), d / 2, sz * L * 0.3];
+      parts.push({ size: [0.26, d, d], pos: at, color: 0x0e0e10, cyl: true });
+      parts.push({ size: [0.28, d * 0.56, d * 0.56], pos: at, color: 0x9a9da3, cyl: true });
     }
   if (kind === 'police') {
     parts.push({ size: [0.5, 0.14, 0.26], pos: [0.3, top + 0.1, -0.3], color: 0x2a5cff, glow: 4 });
