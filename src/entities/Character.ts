@@ -47,7 +47,7 @@ export class Character {
           { size: [0.52, 0.62, 0.28], pos: [0, 1.17, 0], color: o.shirt },
           { size: [0.48, 0.16, 0.27], pos: [0, 0.82, 0], color: o.pants },
           { size: [0.12, 0.08, 0.12], pos: [0, 1.51, 0], color: o.skin },
-          { size: [0.3, 0.3, 0.3], pos: [0, 1.68, 0], color: o.skin },
+          { size: [0.3, 0.3, 0.3], pos: [0, 1.68, 0], color: o.skin, round: 0.8 },
           { size: [0.33, 0.12, 0.33], pos: [0, 1.82, -0.01], color: o.hair },
           { size: [0.33, 0.2, 0.1], pos: [0, 1.7, -0.13], color: o.hair },
         ]),

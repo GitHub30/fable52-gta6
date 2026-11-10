@@ -1,4 +1,5 @@
 import { City } from '../world/City';
+import { GRAPHICS_LEVELS, GRAPHICS_LABEL, GraphicsLevel } from '../core/Graphics';
 
 export interface HudState {
   money: number;
@@ -178,6 +179,25 @@ export class Hud {
       '<div class="credits">地図データ © OpenStreetMap contributors ／ 航空写真・標高: 国土地理院（地理院タイル）</div>'
     );
   }
+  /** Set by the game: current graphics quality and how to change it. */
+  graphics: { level: () => GraphicsLevel; set: (l: GraphicsLevel) => void } | null = null;
+  private graphicsRow() {
+    const wrap = el('div', '');
+    const row = el('div', 'gfx', '<span>グラフィック</span>');
+    const buttons = GRAPHICS_LEVELS.map((l) => {
+      const b = el('button', '', GRAPHICS_LABEL[l]) as HTMLButtonElement;
+      b.onclick = () => {
+        this.graphics?.set(l);
+        paint();
+      };
+      row.append(b);
+      return b;
+    });
+    const paint = () => buttons.forEach((b, i) => b.classList.toggle('on', GRAPHICS_LEVELS[i] === this.graphics?.level()));
+    paint();
+    wrap.append(row, el('div', 'gfx-note', 'ローポリ: 軽量 ／ 高精細: 滑らかなモデル・反射・ブルーム（標準） ／ 最高: さらに高解像度。30fps を下回ると解像度を自動で下げます。'));
+    return wrap;
+  }
   private button(label: string, alt: boolean, fn: () => void) {
     const b = el('button', 'btn' + (alt ? ' alt' : ''), label) as HTMLButtonElement;
     b.onclick = fn;
@@ -188,6 +208,7 @@ export class Hud {
     const card = el('div', 'card', `<h1 class="title">VELA BAY</h1><div class="subtitle">OSAKA ・ 通天閣 / 天王寺</div>`);
     if (hasSave) card.append(this.button('つづきから', false, onContinue));
     card.append(this.button('ニューゲーム', hasSave, onNew));
+    card.append(this.graphicsRow());
     card.insertAdjacentHTML('beforeend', this.controlsHtml());
     this.overlay.innerHTML = '';
     this.overlay.append(card);
@@ -196,6 +217,7 @@ export class Hud {
   showPause(onResume: () => void, onSave: () => void, onNew: () => void, stats: string) {
     const card = el('div', 'card', `<h1 class="title" style="font-size:44px">PAUSE</h1><div class="subtitle">${stats}</div>`);
     card.append(this.button('再開', false, onResume), this.button('セーブ', true, onSave), this.button('ニューゲーム（最初から）', true, onNew));
+    card.append(this.graphicsRow());
     card.insertAdjacentHTML('beforeend', this.controlsHtml());
     this.overlay.innerHTML = '';
     this.overlay.append(card);

@@ -31,7 +31,7 @@ export class Environment {
 
   readonly sun = new THREE.DirectionalLight(0xffffff, 3);
   readonly hemi = new THREE.HemisphereLight(0xbfd9ff, 0x6b6557, 1);
-  private sky: THREE.Mesh;
+  readonly sky: THREE.Mesh;
   private skyUniforms = {
     top: { value: new THREE.Color() },
     horizon: { value: new THREE.Color() },

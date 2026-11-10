@@ -149,6 +149,9 @@ export class City {
   private lampGlow!: THREE.MeshBasicMaterial;
   private lampBulb!: THREE.MeshStandardMaterial;
   private glows!: THREE.InstancedMesh;
+  private trunks!: THREE.InstancedMesh;
+  private leaves!: THREE.InstancedMesh;
+  private treeDetail = 0;
   private markMats: THREE.MeshStandardMaterial[] = [];
   private segHash = new Map<number, number[]>(); // (edge << 12 | segment) per 40 m cell
   private lanes = new Map<number, Float32Array>();
@@ -440,6 +443,8 @@ export class City {
       this.collision.add({ x0: t.x - 0.3, z0: t.z - 0.3, x1: t.x + 0.3, z1: t.z + 0.3, top: y + 3 });
     });
     trunks.castShadow = leaves.castShadow = true;
+    this.trunks = trunks;
+    this.leaves = leaves;
 
     // ---------- street lamps along the main roads
     const lampSpots: { x: number; z: number; gx: number; gz: number; rot: number }[] = [];
@@ -531,6 +536,39 @@ export class City {
     for (let i = 0, j = g.length - 2; i < g.length; j = i, i += 2)
       if (g[i + 1] > z !== g[j + 1] > z && x < ((g[j] - g[i]) * (z - g[i + 1])) / (g[j + 1] - g[i + 1]) + g[i]) c = !c;
     return c;
+  }
+
+  /** Scenery detail: 0 keeps the faceted low-poly trees, higher levels use smooth, lumpy crowns and round trunks. */
+  setDetail(d: number) {
+    d = Math.min(d, 1);
+    if (d === this.treeDetail) return;
+    this.treeDetail = d;
+    this.trunks.geometry.dispose();
+    this.leaves.geometry.dispose();
+    const trunk = new THREE.CylinderGeometry(0.16, 0.24, 1, d ? 14 : 6);
+    trunk.translate(0, 0.5, 0);
+    this.trunks.geometry = trunk;
+    let crown: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, d ? 4 : 1);
+    if (d) {
+      // push the sphere in and out along its normals so the crown reads as clumps of foliage
+      const p = crown.attributes.position;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i);
+        const n = Math.sin(v.x * 5.1 + 1.3) * Math.sin(v.y * 4.3 + 0.4) * Math.sin(v.z * 5.7 + 2.1);
+        const m = Math.sin(v.x * 11 + v.y * 9) * Math.sin(v.z * 10 - v.y * 7);
+        v.multiplyScalar(1 + n * 0.22 + m * 0.07);
+        if (v.y < 0) v.y *= 0.75; // flatter underside
+        p.setXYZ(i, v.x, v.y, v.z);
+        // the sphere's own normal is close enough and keeps the shading smooth across faces
+        v.normalize();
+        crown.attributes.normal.setXYZ(i, v.x, v.y, v.z);
+      }
+    }
+    this.leaves.geometry = crown;
+    const mat = this.leaves.material as THREE.MeshStandardMaterial;
+    mat.flatShading = !d;
+    mat.needsUpdate = true;
   }
 
   /** 0 (day) .. 1 (night): drives window and street-lamp emissives. */

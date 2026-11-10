@@ -10,6 +10,7 @@ import { Player } from './entities/Player';
 import { Vehicle, VehicleKind, collideVehicles } from './entities/Vehicle';
 import { Helicopter } from './entities/Helicopter';
 import { mergeBoxes, vertexColorMaterial } from './core/geo';
+import { Graphics } from './core/Graphics';
 import { Traffic } from './ai/Traffic';
 import { Pedestrians, Ped } from './ai/Pedestrians';
 import { Officers } from './ai/Officers';
@@ -23,7 +24,6 @@ export type GameState = 'menu' | 'playing' | 'paused';
 const camFwd = { x: 0, z: 0 };
 const tmp = { x: 0, z: 0 };
 const WEATHER_ORDER: Weather[] = ['clear', 'cloudy', 'rain', 'fog'];
-const QUALITY_STEPS = [1.5, 1.25, 1, 0.8];
 
 export type Weapon = 'fist' | 'pistol' | 'ak47' | 'rocket';
 const WEAPON_KEYS: Weapon[] = ['fist', 'pistol', 'ak47', 'rocket'];
@@ -108,7 +108,7 @@ export class Game {
   private autosaveT = 60;
   private smokeT = 0;
   private headlight = new THREE.SpotLight(0xfff1d0, 0, 70, 0.5, 0.6, 1.2);
-  private quality = 0;
+  readonly gfx: Graphics;
   private lowFpsT = 0;
   private cssW = 0;
   private cssH = 0;
@@ -119,7 +119,6 @@ export class Game {
     this.city = new City(data);
     this.spawnPoint = this.city.sideSpot(PLACES.tsutenkaku.x + 35, PLACES.tsutenkaku.z + 60);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY_STEPS[0]));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -129,6 +128,8 @@ export class Game {
     this.env = new Environment(this.scene);
     this.effects = new Effects(this.scene);
     this.hud = new Hud(uiRoot, this.city);
+    this.gfx = new Graphics(this.renderer, this.scene, this.camera, this.env, this.city);
+    this.hud.graphics = { level: () => this.gfx.level, set: (l) => this.gfx.apply(l) };
     this.rig.groundAt = (x, z) => this.city.groundHeight(x, z);
     this.scene.add(this.city.group, this.player.group, this.headlight, this.headlight.target);
     this.player.onStep = () => this.audio.step();
@@ -167,7 +168,7 @@ export class Game {
     const w = window.innerWidth, h = window.innerHeight;
     this.cssW = w;
     this.cssH = h;
-    this.renderer.setSize(w, h, false);
+    this.gfx.resize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -358,20 +359,13 @@ export class Game {
     this.fps = Math.round(this.fpsFrames / this.fpsTime);
     this.fpsFrames = 0;
     this.fpsTime = 0;
-    // adaptive resolution: step down when the GPU cannot hold ~40 fps
+    // adaptive resolution: step down when the GPU cannot hold 30 fps
     if (this.state !== 'playing' || document.hidden || !document.hasFocus()) return; // unfocused tabs are throttled by the browser
     if (this.fps < 27) this.lowFpsT += 0.5; // below a 30 Hz cap, so capped displays do not trigger it
     else this.lowFpsT = Math.max(0, this.lowFpsT - 0.25);
-    if (this.lowFpsT >= 3 && this.quality < QUALITY_STEPS.length - 1) {
-      this.quality++;
+    if (this.lowFpsT >= 3) {
       this.lowFpsT = 0;
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY_STEPS[this.quality]));
-      this.renderer.setSize(this.cssW, this.cssH, false);
-      if (this.quality === QUALITY_STEPS.length - 1) {
-        this.env.sun.shadow.mapSize.set(1024, 1024);
-        this.env.sun.shadow.map?.dispose();
-        this.env.sun.shadow.map = null as any;
-      }
+      this.gfx.stepDown();
     }
   }
 
@@ -392,7 +386,7 @@ export class Game {
       this.peds.update(dt);
       this.rig.update(dt, this.input, this.player.pos, null, 0, this.city.collision);
     }
-    this.renderer.render(this.scene, this.camera);
+    this.gfx.render(dt);
     this.input.endFrame();
   }
 
