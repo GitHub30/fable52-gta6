@@ -97,7 +97,7 @@ export class Pedestrians {
       p.state = 'walk';
       p.health = 100;
       p.vx = p.vz = 0;
-      p.char.group.rotation.x = 0;
+      p.char.setDown(false);
       p.heading = Math.atan2(p.tx - p.pos.x, p.tz - p.pos.z);
       return;
     }
@@ -117,7 +117,7 @@ export class Pedestrians {
     this.attach(p, x, z, false);
     p.health = 100;
     p.state = 'walk';
-    p.char.group.rotation.x = 0;
+    p.char.setDown(false);
     this.scare(p, 10);
   }
 
@@ -138,7 +138,7 @@ export class Pedestrians {
     p.health = 0;
     p.vx = vx;
     p.vz = vz;
-    p.char.group.rotation.x = -Math.PI / 2;
+    p.char.setDown(true);
   }
 
   private nextTarget(p: Ped) {
@@ -188,7 +188,7 @@ export class Pedestrians {
         p.vx *= k;
         p.vz *= k;
         if ((p.t -= dt) <= 0) this.respawn(p, 80, 190);
-        grp.position.set(p.pos.x, g.city.groundHeight(p.pos.x, p.pos.z) + 0.18, p.pos.z);
+        grp.position.set(p.pos.x, g.city.roadHeight(p.pos.x, p.pos.z), p.pos.z);
         continue;
       }
 
@@ -263,8 +263,9 @@ export class Pedestrians {
         }
       }
 
-      grp.position.set(p.pos.x, g.city.groundHeight(p.pos.x, p.pos.z), p.pos.z);
+      grp.position.set(p.pos.x, g.city.roadHeight(p.pos.x, p.pos.z), p.pos.z);
       grp.rotation.y = p.heading;
+      p.char.lod(g.camera.position.distanceTo(grp.position));
       if (far < 90) p.char.animate(dt, speed);
     }
   }

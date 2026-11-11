@@ -622,9 +622,9 @@ export class City {
       }
     return top;
   }
-  /** What someone on foot at height `y` stands on: the terrain, or a footbridge deck or stair within a step of their feet. */
+  /** What someone on foot at height `y` stands on: the road or terrain, or a footbridge deck or stair within a step of their feet. */
   floorHeight(x: number, z: number, y: number) {
-    return Math.max(terrainHeight(this.data, x, z), this.footbridge.height(x, z, y));
+    return Math.max(this.roadHeight(x, z), this.footbridge.height(x, z, y));
   }
 
   districtName(x: number, z: number) {

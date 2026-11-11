@@ -266,7 +266,7 @@ export class Game {
       p.vehicle.throttle = 0;
     }
     p.vehicle = null;
-    p.group.rotation.x = 0;
+    p.char.setDown(false);
     p.syncMesh();
     this.rig.snap(p.pos, heading + Math.PI);
   }
@@ -1203,7 +1203,7 @@ export class Game {
     if (this.heli) this.leaveHeli();
     if (p.vehicle) this.exitVehicle(true);
     p.dead = true;
-    p.group.rotation.x = -Math.PI / 2;
+    p.char.setDown(true);
     this.frozen = 4.2;
     this.respawnT = 4;
     this.respawnAt = at;

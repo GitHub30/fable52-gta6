@@ -29,7 +29,7 @@ export class Officers {
 
   private deploy(x: number, z: number, heading: number) {
     const o: Officer = {
-      char: new Character({ skin: 0xd9a47a, shirt: 0x1d2b4f, pants: 0x14192b, hair: 0x0c1020 }),
+      char: new Character({ model: 'man', top: 0x86b4e6, bottom: 0x1c2238, cap: 0x141a30, police: true }),
       pos: new THREE.Vector3(x, 0, z),
       heading, health: 100, down: false, t: 0, shootT: rand(0.6, 1.2), arrestT: 0, vx: 0, vz: 0,
     };
@@ -76,7 +76,7 @@ export class Officers {
     o.t = 12;
     o.vx = vx;
     o.vz = vz;
-    o.char.group.rotation.x = -Math.PI / 2;
+    o.char.setDown(true);
   }
 
   update(dt: number) {
@@ -113,7 +113,7 @@ export class Officers {
         o.vx *= f;
         o.vz *= f;
         if ((o.t -= dt) <= 0) { this.remove(o); continue; }
-        grp.position.set(o.pos.x, g.city.groundHeight(o.pos.x, o.pos.z) + 0.18, o.pos.z);
+        grp.position.set(o.pos.x, g.city.roadHeight(o.pos.x, o.pos.z), o.pos.z);
         continue;
       }
       if (d > 120) { this.remove(o); continue; }
@@ -179,8 +179,9 @@ export class Officers {
       }
       if (o.down) continue;
 
-      grp.position.set(o.pos.x, g.city.groundHeight(o.pos.x, o.pos.z), o.pos.z);
+      grp.position.set(o.pos.x, g.city.roadHeight(o.pos.x, o.pos.z), o.pos.z);
       grp.rotation.y = o.heading;
+      o.char.lod(g.camera.position.distanceTo(grp.position));
       o.char.animate(dt, speed);
     }
   }

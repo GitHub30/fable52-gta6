@@ -1,12 +1,13 @@
 import { Game } from './Game';
 import { loadWorld } from './world/WorldData';
+import { loadPeople } from './entities/People';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 ui.innerHTML = '<div class="loading">大阪・天王寺を読み込み中…</div>';
 
-loadWorld()
-  .then((data) => {
+Promise.all([loadWorld(), loadPeople()])
+  .then(([data]) => {
     ui.innerHTML = '';
     const game = new Game(canvas, ui, data);
     game.start();
