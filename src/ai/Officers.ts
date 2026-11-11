@@ -29,7 +29,7 @@ export class Officers {
 
   private deploy(x: number, z: number, heading: number) {
     const o: Officer = {
-      char: new Character({ skin: 0xd9a47a, shirt: 0x1d2b4f, pants: 0x14192b, hair: 0x0c1020 }),
+      char: new Character({ skin: 0xd9a47a, shirt: 0x1d2b4f, pants: 0x14192b, hair: 0x0c1020, hairStyle: 0, longSleeves: true, cap: 0x141c33 }),
       pos: new THREE.Vector3(x, 0, z),
       heading, health: 100, down: false, t: 0, shootT: rand(0.6, 1.2), arrestT: 0, vx: 0, vz: 0,
     };
