@@ -17,7 +17,7 @@ const FIN_Z0 = -20.5, FIN_Z1 = -11.5, FIN_Y0 = AX + 1.0, FIN_Y1 = AX + 8.2;
 type V3 = [number, number, number];
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-const range = (a: number, b: number, n: number) => Array.from({ length: n + 1 }, (_, i) => a + ((b - a) * i) / n);
+export const range = (a: number, b: number, n: number) => Array.from({ length: n + 1 }, (_, i) => a + ((b - a) * i) / n);
 
 // ------------------------------------------------------------------ surface builder
 interface GridOpt {
@@ -28,7 +28,7 @@ interface GridOpt {
 const tint = new THREE.Color();
 
 /** Collects parametric surfaces and stock geometries into one vertex-coloured, UV-mapped geometry. */
-class Surf {
+export class Surf {
   private pos: number[] = [];
   private nor: number[] = [];
   private col: number[] = [];
@@ -99,8 +99,8 @@ class Surf {
   }
 }
 
-const at = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
-const xf = (pos: V3, rot: V3 = [0, 0, 0], scale: V3 = [1, 1, 1]) =>
+export const at = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
+export const xf = (pos: V3, rot: V3 = [0, 0, 0], scale: V3 = [1, 1, 1]) =>
   new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot)), new THREE.Vector3(...scale));
 
 // ------------------------------------------------------------------ airframe shape

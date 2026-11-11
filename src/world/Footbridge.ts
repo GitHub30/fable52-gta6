@@ -76,7 +76,7 @@ function sample(pts: XZ[], closed: boolean, step: number): Sample[] {
 }
 
 /** Quads between two rails of points, with u across and v along. `keep(i)` drops quads (openings at junctions). */
-function strip(a: THREE.Vector3[], b: THREE.Vector3[], v: number[], keep: (i: number) => boolean = () => true, u0 = 0, u1 = 1) {
+export function strip(a: THREE.Vector3[], b: THREE.Vector3[], v: number[], keep: (i: number) => boolean = () => true, u0 = 0, u1 = 1) {
   const pos: number[] = [], uv: number[] = [];
   for (let i = 0; i < a.length - 1; i++) {
     if (!keep(i)) continue;
@@ -92,7 +92,7 @@ function strip(a: THREE.Vector3[], b: THREE.Vector3[], v: number[], keep: (i: nu
 }
 
 const up = new THREE.Vector3(0, 1, 0);
-function tube(a: THREE.Vector3, b: THREE.Vector3, r: number, sides = 10) {
+export function tube(a: THREE.Vector3, b: THREE.Vector3, r: number, sides = 10) {
   const d = b.clone().sub(a), len = d.length();
   const g = new THREE.CylinderGeometry(r, r, len, sides, 1, true).toNonIndexed();
   g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, d.divideScalar(len)));

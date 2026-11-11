@@ -5,6 +5,7 @@ import { WorldData, Edge, terrainHeight } from './WorldData';
 import { mergeBoxes, vertexColorMaterial, BoxPart } from '../core/geo';
 import { Stores } from './Stores';
 import { Footbridge } from './Footbridge';
+import { Railway } from './Railway';
 
 /** Named places (local metres: x east, z south) used for district names, missions and spawn points. */
 export const PLACES = {
@@ -150,6 +151,7 @@ export class City {
   private facadeMats: THREE.MeshStandardMaterial[] = [];
   stores!: Stores;
   footbridge!: Footbridge;
+  railway!: Railway;
   private lampGlow!: THREE.MeshBasicMaterial;
   private lampBulb!: THREE.MeshStandardMaterial;
   private glows!: THREE.InstancedMesh;
@@ -417,6 +419,8 @@ export class City {
     this.group.add(this.stores.group);
     this.footbridge = new Footbridge(this);
     this.group.add(this.footbridge.group);
+    this.railway = new Railway(data, this);
+    this.group.add(this.railway.group);
 
     // ---------- trees: mapped ones plus a scatter inside parks and temple grounds
     const treeSpots: { x: number; z: number; s: number }[] = [];

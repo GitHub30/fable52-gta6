@@ -10,6 +10,7 @@ import { Player } from './entities/Player';
 import { Vehicle, VehicleKind, collideVehicles } from './entities/Vehicle';
 import { Helicopter } from './entities/Helicopter';
 import { Airplane } from './entities/Airplane';
+import { Train } from './entities/Train';
 import { mergeBoxes, vertexColorMaterial } from './core/geo';
 import { Graphics } from './core/Graphics';
 import { Traffic } from './ai/Traffic';
@@ -91,6 +92,7 @@ export class Game {
   state: GameState = 'menu';
   weapon: Weapon = 'pistol'; // the player starts armed
   readonly ammoBy = { pistol: 36, ak47: 90, rocket: 6 };
+  readonly trains: Train[] = [];
   readonly helis: Aircraft[] = [];
   heli: Aircraft | null = null; // the one being flown
   private nearHeli: Aircraft | null = null;
@@ -167,6 +169,13 @@ export class Game {
     const plane = new Airplane({ x: apron.x, z: apron.z, heading: PLANE_AT.heading }, this.city, this.renderer.capabilities.maxTextureSize);
     this.helis.push(plane);
     this.scene.add(plane.group);
+
+    // one Hana Akari set on each line of the Loop Line, the second starting part-way round
+    this.city.railway.lines.forEach((line, k) => {
+      const train = new Train(line, k ? line.length * 0.8 : line.length * 0.15);
+      this.trains.push(train);
+      this.scene.add(train.group);
+    });
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -430,6 +439,7 @@ export class Game {
       this.env.update(dt * 0.2, this.player.pos, this.camera);
       this.city.setNight(this.env.night);
       this.traffic.update(dt);
+      this.updateTrains(dt);
       for (const v of this.vehicles) v.update(dt, this.city, 1);
       this.peds.update(dt);
       this.rig.update(dt, this.input, this.player.pos, null, 0, this.city.collision);
@@ -546,6 +556,7 @@ export class Game {
 
     // --- characters
     this.updateHelis(dt, frozen, smokeNow);
+    this.updateTrains(dt);
     this.updateMcvs(dt);
     this.updateRockets(dt);
     p.update(dt, input, camFwd, this.city, frozen);
@@ -1048,6 +1059,27 @@ export class Game {
     if (!byPlayer) return; // army shells are not the player's crime
     if (cops) this.onOfficerDown('警官を爆破');
     else this.wanted.crime(knocked ? 3 : 2, 5, '爆破');
+  }
+
+  // ------------------------------------------------------------------ trains
+  private updateTrains(dt: number) {
+    const p = this.player;
+    for (const t of this.trains) {
+      t.update(dt);
+      t.model.setNight(this.env.night);
+      // standing in front of a moving train is fatal; a stopped one just shoves
+      if (this.state !== 'playing' || p.dead || p.vehicle || p.inHeli || !t.hits(p.pos)) continue;
+      if (t.speed > 2 && this.invulnT <= 0) {
+        this.invulnT = 1;
+        this.damagePlayer(40 + t.speed * 6);
+        this.rig.shake = 0.8;
+        this.audio.crash(20, 0);
+      }
+      p.vel.y = 4;
+      p.onGround = false;
+      p.vel.x += (Math.random() - 0.5) * 6 + t.speed * 0.3;
+      p.vel.z += (Math.random() - 0.5) * 6;
+    }
   }
 
   // ------------------------------------------------------------------ helicopters
