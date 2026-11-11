@@ -12,6 +12,9 @@ export class CameraRig {
   private focus = new THREE.Vector3();
   private initialised = false;
   shake = 0;
+  /** Extra distance and focus height for large vehicles (the airliner). */
+  extraDist = 0;
+  lift = 0;
   /** Terrain height lookup so the camera never dips below the ground. */
   groundAt: (x: number, z: number) => number = () => 0;
 
@@ -38,10 +41,10 @@ export class CameraRig {
       this.yaw += angleDiff(want, this.yaw) * (1 - Math.exp(-2.6 * dt));
       this.pitch = damp(this.pitch, 0.24, 1.5, dt);
     }
-    const wantDist = driving ? 8.5 + Math.min(4, Math.abs(speed) * 0.09) : 4.6;
+    const wantDist = (driving ? 8.5 + Math.min(4, Math.abs(speed) * 0.09) : 4.6) + this.extraDist;
     this.dist = damp(this.dist, wantDist, 4, dt);
 
-    const head = driving ? 1.5 : 1.55;
+    const head = (driving ? 1.5 : 1.55) + this.lift;
     if (!this.initialised) {
       this.focus.set(target.x, target.y + head, target.z);
       this.initialised = true;

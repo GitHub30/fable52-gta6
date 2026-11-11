@@ -29,6 +29,13 @@ export class Helicopter {
   private pitch = 0;
   private roll = 0;
   readonly radius = 2.1;
+  readonly title = 'UH-60J';
+  readonly help = '🚁 <b>Space</b> 上昇 / <b>Shift</b> 下降 / <b>W A S D</b> 飛行。着陸して <b>E</b> で降りる。';
+  readonly music = false;
+  readonly camDist = 0;
+  readonly camLift = 0;
+  readonly exitSide = 2.4;
+  readonly exitFwd = 0;
 
   constructor(readonly home: { x: number; z: number; heading: number }, private city: City) {
     bodyGeo ??= mergeBoxes(uh60jBody());
@@ -59,6 +66,9 @@ export class Helicopter {
     this.sync();
   }
 
+  canBoard(p: THREE.Vector3) {
+    return this.pos.distanceToSquared(p) < 22;
+  }
   get airspeed() {
     return Math.hypot(this.vel.x, this.vel.z);
   }

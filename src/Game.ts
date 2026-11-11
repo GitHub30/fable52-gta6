@@ -9,6 +9,7 @@ import { Effects } from './world/Effects';
 import { Player } from './entities/Player';
 import { Vehicle, VehicleKind, collideVehicles } from './entities/Vehicle';
 import { Helicopter } from './entities/Helicopter';
+import { Airplane } from './entities/Airplane';
 import { mergeBoxes, vertexColorMaterial } from './core/geo';
 import { Graphics } from './core/Graphics';
 import { Traffic } from './ai/Traffic';
@@ -20,6 +21,8 @@ import { Save } from './systems/Save';
 import { Hud, Blip } from './ui/Hud';
 import { BOUND, mulberry32, rand, clamp } from './config';
 
+/** Anything the player can fly: both classes expose the same controls-and-state interface. */
+export type Aircraft = Helicopter | Airplane;
 export type GameState = 'menu' | 'playing' | 'paused';
 const camFwd = { x: 0, z: 0 };
 const tmp = { x: 0, z: 0 };
@@ -36,6 +39,7 @@ const GUNS = {
 const ROCKET_SPEED = 46, BLAST_RADIUS = 9;
 const FUSE = 0.6; // seconds between a car reaching zero health and blowing up
 const SHELL_SPEED = 85, MCV_RELOAD = 6;
+const PLANE_AT = { x: -232, z: -260, heading: 6.02 }; // the open plaza beside the starting point, nose down the one street long enough to take off from
 const shellGeo = new THREE.BoxGeometry(0.2, 0.2, 1.3);
 const shellMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, emissive: 0xffc04a, emissiveIntensity: 1.6 });
 const muzzle = { x: 0, y: 0, z: 0, dx: 0, dz: 0 };
@@ -85,9 +89,9 @@ export class Game {
   state: GameState = 'menu';
   weapon: Weapon = 'pistol'; // the player starts armed
   readonly ammoBy = { pistol: 36, ak47: 90, rocket: 6 };
-  readonly helis: Helicopter[] = [];
-  heli: Helicopter | null = null; // the one being flown
-  private nearHeli: Helicopter | null = null;
+  readonly helis: Aircraft[] = [];
+  heli: Aircraft | null = null; // the one being flown
+  private nearHeli: Aircraft | null = null;
   /** Rockets and tank shells in flight. `hostile` ones were fired at the player; `owner` is the vehicle that fired. */
   private rockets: { mesh: THREE.Mesh; vx: number; vy: number; vz: number; life: number; hostile: boolean; owner: Vehicle | null }[] = [];
   private shownProp = '';
@@ -152,6 +156,12 @@ export class Game {
       this.helis.push(h);
       this.scene.add(h.group);
     }
+
+    // the Vietjet airliner waits on the plaza below Tsutenkaku
+    const apron = this.city.clearSpot(PLANE_AT.x, PLANE_AT.z, 9);
+    const plane = new Airplane({ x: apron.x, z: apron.z, heading: PLANE_AT.heading }, this.city, this.renderer.capabilities.maxTextureSize);
+    this.helis.push(plane);
+    this.scene.add(plane.group);
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -413,7 +423,7 @@ export class Game {
     const near = p.vehicle || this.heli ? null : this.nearestVehicle(p.pos.x, p.pos.z, 4.2);
     this.nearHeli = null;
     if (!p.vehicle && !this.heli)
-      for (const h of this.helis) if (!h.destroyed && h.pos.distanceToSquared(p.pos) < 22) this.nearHeli = h;
+      for (const h of this.helis) if (!h.destroyed && h.canBoard(p.pos)) this.nearHeli = h;
     if (!frozen) {
       if (input.wasPressed('KeyE')) {
         if (this.heli) this.exitHeli();
@@ -530,6 +540,8 @@ export class Game {
     this.city.setNight(this.env.night);
     this.effects.update(dt);
     const ride = this.heli;
+    this.rig.extraDist = ride ? ride.camDist : 0;
+    this.rig.lift = ride ? ride.camLift : 0;
     this.rig.update(dt, input, p.pos, car ? car.heading : ride ? ride.heading : null, car ? car.speed : ride ? ride.airspeed : p.speed, this.city.collision);
     this.updateHeadlight(car);
     // sirens: pursuing patrol cars by distance; the ambulance and fire engine only while the player drives them
@@ -565,8 +577,8 @@ export class Game {
     const p = this.player, m = this.missions;
     if (this.frozen <= 0 && !this.prompt) {
       if (this.heli) {
-        if (this.heli.pos.y - this.city.groundHeight(this.heli.pos.x, this.heli.pos.z) < 0.6 && this.heli.airspeed < 3) this.prompt = ['E', 'ヘリから降りる'];
-      } else if (this.nearHeli) this.prompt = ['E', 'ヘリコプターに乗る'];
+        if (this.heli.pos.y - this.city.groundHeight(this.heli.pos.x, this.heli.pos.z) < 0.6 && this.heli.airspeed < 3) this.prompt = ['E', `${this.heli.title}から降りる`];
+      } else if (this.nearHeli) this.prompt = ['E', `${this.nearHeli.title}に乗る`];
       else if (car) {
         if (Math.abs(car.speed) < 6) this.prompt = ['E', '降りる'];
       } else if (m.nearStart) this.prompt = ['F', `ミッション開始: ${m.nearStart.name}（報酬 $${m.nearStart.reward}）`];
@@ -583,7 +595,7 @@ export class Game {
       district: this.city.districtName(p.pos.x, p.pos.z),
       speedKmh: car ? Math.round(Math.abs(car.speed) * 3.6) : this.heli ? Math.round(this.heli.airspeed * 3.6) : null,
       carHealth: car ? Math.round(car.health) : this.heli ? Math.round(this.heli.health) : 0,
-      carName: car ? car.spec.name : this.heli ? 'UH-60J  高度 ' + Math.round(this.heli.pos.y) + 'm' : '',
+      carName: car ? car.spec.name : this.heli ? this.heli.title + '  高度 ' + Math.round(this.heli.pos.y) + 'm' : '',
       objective: m.objectiveText,
       timer: m.active ? Math.ceil(m.active.timeLeft) : null,
       fps: this.fps,
@@ -607,7 +619,7 @@ export class Game {
         out.push({ x: v.pos.x, z: v.pos.z, color: v.driver === 'none' ? '#cfd6e0' : '#8fa0b5', shape: 'square', size: 2 });
     }
     for (const o of this.officers.list) if (!o.down) out.push({ x: o.pos.x, z: o.pos.z, color: '#3b7bff', shape: 'dot', size: 3.5 });
-    for (const h of this.helis) if (!h.destroyed && h !== this.heli) out.push({ x: h.pos.x, z: h.pos.z, color: '#ffffff', shape: 'diamond', size: 4, clampEdge: true });
+    for (const h of this.helis) if (!h.destroyed && h !== this.heli) out.push({ x: h.pos.x, z: h.pos.z, color: h.music ? '#ff4a3a' : '#ffffff', shape: 'diamond', size: h.music ? 5 : 4, clampEdge: true });
     this.missions.blips(out);
   }
 
@@ -1010,6 +1022,7 @@ export class Game {
         if ((h.respawnT -= dt) <= 0) h.reset();
         continue;
       }
+      if (h instanceof Airplane) h.night = this.env.night;
       h.update(dt, h === this.heli && !frozen ? this.input : null, this.city);
       if (h.impact > 4) {
         this.audio.crash(h.impact, h.pos.distanceTo(p.pos));
@@ -1031,7 +1044,7 @@ export class Game {
     }
   }
 
-  enterHeli(h: Helicopter) {
+  enterHeli(h: Aircraft) {
     const p = this.player;
     this.heli = h;
     h.piloted = true;
@@ -1039,7 +1052,8 @@ export class Game {
     p.vel.set(0, 0, 0);
     p.syncMesh();
     this.audio.door();
-    this.hud.notify('🚁 <b>Space</b> 上昇 / <b>Shift</b> 下降 / <b>W A S D</b> 飛行。着陸して <b>E</b> で降りる。');
+    this.audio.setCabinMusic(h.music);
+    this.hud.notify(h.help);
   }
 
   /** Normal exit: only when landed at street level. */
@@ -1060,9 +1074,11 @@ export class Game {
     h.piloted = false;
     this.heli = null;
     p.inHeli = false;
+    this.audio.setCabinMusic(false);
     const lx = Math.cos(h.heading), lz = -Math.sin(h.heading);
+    const bx = h.pos.x + Math.sin(h.heading) * h.exitFwd, bz = h.pos.z + Math.cos(h.heading) * h.exitFwd;
     for (const s of [1, -1]) {
-      const x = clamp(h.pos.x + lx * 2.4 * s, -BOUND.x, BOUND.x), z = clamp(h.pos.z + lz * 2.4 * s, -BOUND.z, BOUND.z);
+      const x = clamp(bx + lx * h.exitSide * s, -BOUND.x, BOUND.x), z = clamp(bz + lz * h.exitSide * s, -BOUND.z, BOUND.z);
       if (!this.city.collision.pointBlocked(x, h.pos.y + 0.5, z, 0.4) || s === -1) {
         p.pos.set(x, Math.max(h.pos.y, this.city.groundHeight(x, z)), z);
         break;

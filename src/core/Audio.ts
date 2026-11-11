@@ -23,6 +23,9 @@ export class GameAudio {
   private radioNext = 0;
   private radioStep = 0;
   muted = false;
+  private music: HTMLAudioElement | null = null;
+  private musicGain!: GainNode;
+  private musicOn = false;
 
   /** Must be called from a user gesture. Safe to call repeatedly. */
   init() {
@@ -82,6 +85,9 @@ export class GameAudio {
       this.radioGain = ctx.createGain();
       this.radioGain.gain.value = 0;
       this.radioGain.connect(this.master);
+      this.musicGain = ctx.createGain();
+      this.musicGain.gain.value = 0;
+      this.musicGain.connect(this.master);
     } catch {
       this.ctx = null; // audio unavailable: the game stays silent but playable
     }
@@ -91,6 +97,31 @@ export class GameAudio {
     if (!this.ctx) return;
     if (paused) this.ctx.suspend().catch(() => {});
     else this.ctx.resume().catch(() => {});
+    if (this.music && this.musicOn) {
+      if (paused) this.music.pause();
+      else this.music.play().catch(() => {});
+    }
+  }
+
+  /** Cabin music of the airliner (public/music/vietjet.m4a): starts from the top on boarding, fades out on leaving. */
+  setCabinMusic(on: boolean) {
+    const ctx = this.ctx;
+    if (!ctx || on === this.musicOn) return;
+    this.musicOn = on;
+    this.musicGain.gain.setTargetAtTime(on ? 1.6 : 0, ctx.currentTime, on ? 0.05 : 0.25);
+    if (on) {
+      if (!this.music) {
+        // streamed rather than decoded: the track is several minutes long
+        this.music = new Audio(new URL('music/vietjet.m4a', document.baseURI).href);
+        this.music.loop = true;
+        ctx.createMediaElementSource(this.music).connect(this.musicGain);
+      }
+      this.music.currentTime = 0;
+      this.music.play().catch(() => {}); // a missing file just leaves the cabin silent
+    } else {
+      const el = this.music;
+      setTimeout(() => !this.musicOn && el?.pause(), 900);
+    }
   }
 
   /** Per-frame continuous sounds. */
@@ -102,7 +133,7 @@ export class GameAudio {
     this.engineOsc.frequency.setTargetAtTime(f, t, 0.06);
     this.engineOsc2.frequency.setTargetAtTime(f * 0.5, t, 0.06);
     this.engineFilter.frequency.setTargetAtTime(300 + Math.abs(speed) * 22, t, 0.1);
-    this.engineGain.gain.setTargetAtTime(inCar ? 0.1 + Math.abs(throttle) * 0.05 : 0, t, 0.1);
+    this.engineGain.gain.setTargetAtTime(inCar ? (0.1 + Math.abs(throttle) * 0.05) * (this.musicOn ? 0.45 : 1) : 0, t, 0.1);
 
     // sirens: each loop starts from its beginning when it becomes audible and stops once faded out
     for (const kind of SIREN_KINDS) {
