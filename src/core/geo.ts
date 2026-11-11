@@ -81,7 +81,15 @@ export function setModelDetail(d: ModelDetail) {
   carPaintMaterial.roughness = d ? 0.28 : 0.35;
   carPaintMaterial.metalness = d ? 0.55 : 0.45;
   carPaintMaterial.needsUpdate = true;
+  for (const fn of listeners) fn(d);
 }
+
+const listeners: ((d: ModelDetail) => void)[] = [];
+/** Models that are not plain merged boxes (the road cars) rebuild themselves through this. */
+export function onModelDetail(fn: (d: ModelDetail) => void) {
+  listeners.push(fn);
+}
+export const modelDetail = () => detail;
 
 export const vertexColorMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.05 });
 /** Burnt-out wrecks: the vertex colours are multiplied down to soot. */

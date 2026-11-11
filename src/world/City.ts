@@ -276,7 +276,7 @@ export class City {
         for (let s = 0; s < n; s++) tmp.push(p[i] + (sx * s) / n, p[i + 1] + (sz * s) / n);
       }
       tmp.push(p[p.length - 2], p[p.length - 1]);
-      const m = tmp.length / 2, half = e.w / 2, lift = 0.07 + (6 - e.k) * 0.012;
+      const m = tmp.length / 2, half = e.w / 2, lift = 0.07 + (6 - e.k) * 0.012; // roadHeight() mirrors this
       let run = 0, prevL = -1, prevR = -1;
       for (let i = 0; i < m; i++) {
         const i0 = Math.max(0, i - 1), i1 = Math.min(m - 1, i + 1);
@@ -595,6 +595,32 @@ export class City {
 
   groundHeight(x: number, z: number) {
     return terrainHeight(this.data, x, z);
+  }
+  /**
+   * Height of what a wheel rolls on: the drawn road surface where there is one, else the terrain.
+   * Road ribbons lie a little above the terrain and span it flat from kerb to kerb, so the terrain alone would sink the tyres.
+   */
+  roadHeight(x: number, z: number) {
+    let top = terrainHeight(this.data, x, z);
+    const cx = Math.floor(x / 40), cz = Math.floor(z / 40);
+    for (let i = cx - 1; i <= cx + 1; i++)
+      for (let j = cz - 1; j <= cz + 1; j++) {
+        const list = this.segHash.get((i + 512) * 1024 + (j + 512));
+        if (!list) continue;
+        for (const code of list) {
+          const e = this.data.edges[Math.floor(code / 4096)], s = (code % 4096) * 2, p = e.pts, half = e.w / 2;
+          const ex = p[s + 2] - p[s], ez = p[s + 3] - p[s + 1], len2 = ex * ex + ez * ez || 1;
+          const t = Math.max(0, Math.min(1, ((x - p[s]) * ex + (z - p[s + 1]) * ez) / len2));
+          const qx = p[s] + ex * t, qz = p[s + 1] + ez * t, ox = x - qx, oz = z - qz;
+          if (ox * ox + oz * oz > half * half) continue;
+          // same construction as the ribbon mesh: both kerbs at terrain height plus the class's lift, straight across
+          const len = Math.sqrt(len2), dx = ex / len, dz = ez / len;
+          const hl = terrainHeight(this.data, qx + dz * half, qz - dx * half), hr = terrainHeight(this.data, qx - dz * half, qz + dx * half);
+          const f = ((ox * dz - oz * dx) / half + 1) / 2;
+          top = Math.max(top, hr + (hl - hr) * f + 0.07 + (6 - e.k) * 0.012);
+        }
+      }
+    return top;
   }
   /** What someone on foot at height `y` stands on: the terrain, or a footbridge deck or stair within a step of their feet. */
   floorHeight(x: number, z: number, y: number) {

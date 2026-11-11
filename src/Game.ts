@@ -471,11 +471,17 @@ export class Game {
     if (!p.vehicle && !this.heli)
       for (const h of this.helis) if (!h.destroyed && h.canBoard(p.pos)) this.nearHeli = h;
     if (!frozen) {
-      if (input.wasPressed('KeyE')) {
+      if (input.wasPressed('KeyE') && !this.boarding) {
         if (this.heli) this.exitHeli();
         else if (p.vehicle) this.exitVehicle();
         else if (this.nearHeli) this.enterHeli(this.nearHeli);
         else if (near) this.enterVehicle(near);
+      }
+      // O: every door and the tailgate of the car you are in or standing next to
+      const doorCar = p.vehicle ?? near;
+      if (input.wasPressed('KeyO') && doorCar && !doorCar.exploded && doorCar.driver !== 'police' && doorCar.driver !== 'ai' && Math.abs(doorCar.speed) < 2) {
+        doorCar.setDoors('all', !doorCar.doorsOpen);
+        this.audio.door();
       }
       const act = input.wasPressed('KeyF') || (input.locked && input.wasPressed('Mouse0'));
       const held = input.isDown('KeyF') || (input.locked && input.isDown('Mouse0'));
@@ -509,6 +515,14 @@ export class Game {
 
     // --- vehicles
     this.rig.forward(camFwd);
+    const bd = this.boarding;
+    if (bd && (bd.t -= dt) <= 0) {
+      // the door is open: get in, unless the player walked off or the car is gone
+      this.boarding = null;
+      const v = bd.v;
+      if (!p.dead && !p.vehicle && !this.heli && !v.exploded && v.driver === 'none' && (v.pos.x - p.pos.x) ** 2 + (v.pos.z - p.pos.z) ** 2 < 36) this.takeSeat(v);
+      v.setDoors('driver', true, 0.25);
+    }
     const car = p.vehicle;
     if (car) {
       car.throttle = frozen ? 0 : input.axis('KeyS', 'KeyW');
@@ -526,6 +540,7 @@ export class Game {
     for (const v of this.vehicles) {
       const dx = Math.abs(v.pos.x - p.pos.x), dz = Math.abs(v.pos.z - p.pos.z);
       v.mesh.visible = dx < 340 && dz < 340;
+      if (v.mesh.visible) v.animate(dt);
       if (v.impact > 0) {
         v.damage(v.impact);
         if (v.impact > 3 && dx < 90 && dz < 90) {
@@ -680,8 +695,11 @@ export class Game {
     return best;
   }
 
-  enterVehicle(v: Vehicle) {
-    const p = this.player;
+  /** A car whose door is opening for the player, and the time until they are in the seat. */
+  private boarding: { v: Vehicle; t: number } | null = null;
+
+  /** Get into a car. `instant` skips the door (scripts and tests). */
+  enterVehicle(v: Vehicle, instant = false) {
     if (v.exploded) {
       this.hud.notify('この車は大破している', 'warn');
       return;
@@ -690,19 +708,30 @@ export class Game {
       this.hud.notify(`${v.spec.name}はロックされている`, 'warn');
       return;
     }
+    const door = v.driverDoor;
     if (v.driver === 'ai') {
-      // carjacking: the driver is thrown out and runs
-      const lx = Math.cos(v.heading), lz = -Math.sin(v.heading);
-      this.peds.eject(v.pos.x + lx * 1.8, v.pos.z + lz * 1.8);
+      // carjacking: the driver is thrown out of their door and runs
+      const lx = Math.cos(v.heading) * door.side, lz = -Math.sin(v.heading) * door.side;
+      this.peds.eject(v.pos.x + lx * 1.8 + Math.sin(v.heading) * door.z, v.pos.z + lz * 1.8 + Math.cos(v.heading) * door.z);
       this.wanted.crime(1, 2, '車両強盗');
       this.stats.carsStolen++;
       this.peds.scareAround(v.pos.x, v.pos.z, 12);
+      v.driver = 'none';
+      v.throttle = 0;
     }
+    this.audio.door();
+    if (instant || !v.hasDoors) return this.takeSeat(v);
+    // the door swings open first; the player gets in a moment later (see step)
+    v.setDoors('driver', true);
+    this.boarding = { v, t: 0.4 };
+  }
+
+  private takeSeat(v: Vehicle) {
+    const p = this.player;
     v.driver = 'player';
     p.vehicle = v;
     p.vel.set(0, 0, 0);
     p.syncMesh();
-    this.audio.door();
   }
 
   exitVehicle(force = false) {
@@ -713,13 +742,15 @@ export class Game {
     v.steer = 0;
     v.handbrake = false;
     p.vehicle = null;
-    // step out on the driver's side (left); fall back to the right if a wall is there
-    const lx = Math.cos(v.heading), lz = -Math.sin(v.heading);
+    // step out of the driver's door (on the right in Japan); fall back to the other side if a wall is there
+    const door = v.driverDoor;
+    const lx = Math.cos(v.heading), lz = -Math.sin(v.heading), fx = Math.sin(v.heading) * door.z, fz = Math.cos(v.heading) * door.z;
     const off = v.spec.wid / 2 + 0.75;
-    for (const s of [1, -1]) {
-      const x = v.pos.x + lx * off * s, z = v.pos.z + lz * off * s;
-      if (!this.city.collision.pointBlocked(x, 0.5, z, 0.4) || s === -1) {
+    for (const s of [door.side, -door.side]) {
+      const x = v.pos.x + lx * off * s + fx, z = v.pos.z + lz * off * s + fz;
+      if (!this.city.collision.pointBlocked(x, 0.5, z, 0.4) || s === -door.side) {
         p.pos.set(x, this.city.groundHeight(x, z), z);
+        if (s === door.side) v.setDoors('driver', true, 0.7);
         break;
       }
     }

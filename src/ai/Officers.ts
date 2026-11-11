@@ -93,8 +93,10 @@ export class Officers {
           if (Math.hypot(v.pos.x - pl.pos.x, v.pos.z - pl.pos.z) > 18) continue;
           v.driver = 'none'; // the empty car stays where it stopped (and can be stolen)
           v.throttle = 0;
-          const lx = Math.cos(v.heading), lz = -Math.sin(v.heading);
-          this.deploy(v.pos.x + lx * 1.9, v.pos.z + lz * 1.9, v.heading);
+          // the officer climbs out of the driver's door, which swings shut behind them
+          const door = v.driverDoor, lx = Math.cos(v.heading) * door.side, lz = -Math.sin(v.heading) * door.side;
+          this.deploy(v.pos.x + lx * 1.9 + Math.sin(v.heading) * door.z, v.pos.z + lz * 1.9 + Math.cos(v.heading) * door.z, v.heading);
+          v.setDoors('driver', true, 1.4);
         }
     }
 
