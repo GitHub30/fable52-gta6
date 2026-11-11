@@ -1,6 +1,6 @@
 import type { Weather } from '../world/Environment';
 
-const KEY = 'velabay.save.v2'; // v2: Osaka map (positions from the old city are meaningless)
+const KEY = 'velabay.save.v2'; // v2: Osaka map (positions from the old city are meaningless). The prefix is the game's former name, kept so saves survive the rename
 
 export interface SaveData {
   money: number;

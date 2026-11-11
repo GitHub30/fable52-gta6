@@ -5,7 +5,7 @@
 <img width="1920" height="1080" alt="スクリーンショット (1108)" src="https://github.com/user-attachments/assets/7aeacba8-8dbe-4b62-81b6-512b65227c9a" />
 
 
-# VELA BAY — Open World Sandbox
+# OSAKA CITY — Open World Sandbox
 
 **▶ ブラウザで遊ぶ: https://github30.github.io/fable52-gta6/**
 

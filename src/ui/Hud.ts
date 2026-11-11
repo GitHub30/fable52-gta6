@@ -207,7 +207,7 @@ export class Hud {
   }
 
   showMenu(hasSave: boolean, onNew: () => void, onContinue: () => void) {
-    const card = el('div', 'card', `<h1 class="title">VELA BAY</h1><div class="subtitle">OSAKA ・ 通天閣 / 天王寺</div>`);
+    const card = el('div', 'card', `<h1 class="title">OSAKA CITY</h1><div class="subtitle">通天閣 ・ 新世界 ・ 天王寺</div>`);
     if (hasSave) card.append(this.button('つづきから', false, onContinue));
     card.append(this.button('ニューゲーム', hasSave, onNew));
     card.append(this.graphicsRow());

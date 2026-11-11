@@ -25,7 +25,7 @@ const PRESETS: Record<GraphicsLevel, Preset> = {
 };
 /** Resolution scale steps used when the frame rate cannot be held. */
 const SCALE_STEPS = [1, 0.85, 0.7, 0.55];
-const KEY = 'velabay.graphics';
+const KEY = 'velabay.graphics'; // the game's former name: kept so existing settings survive the rename
 
 /** Graphics quality: presets, the optional post-processing chain, sky reflections and adaptive resolution. */
 export class Graphics {
