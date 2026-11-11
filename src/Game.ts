@@ -282,7 +282,7 @@ export class Game {
     this.hud.hideOverlay();
     this.hud.setVisible(true);
     this.state = 'playing';
-    this.input.lock();
+    this.enterFullscreen();
     this.hud.notify('ようこそ、大阪・新世界へ。<b>E</b> で車に乗り、<b>ピンクのマーカー</b>でミッション開始。');
   }
   pause() {
@@ -306,7 +306,37 @@ export class Game {
     this.hud.hideOverlay();
     this.state = 'playing';
     this.audio.setPaused(false);
-    this.input.lock();
+    this.enterFullscreen();
+  }
+
+  /**
+   * Fill the screen, hold phones in landscape, then capture the mouse. Must run inside a user gesture
+   * (the start and resume buttons). Each step is optional: iPhone Safari has no page fullscreen, and
+   * orientation lock exists only on mobile browsers, so failures are ignored and play goes on in the tab.
+   */
+  private enterFullscreen() {
+    const root = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+    const request = root.requestFullscreen ?? root.webkitRequestFullscreen;
+    const lockMouse = () => {
+      if (this.state === 'playing') this.input.lock();
+    };
+    if (!request || document.fullscreenElement) return lockMouse();
+    let entered: Promise<void> | void;
+    try {
+      entered = request.call(root, { navigationUI: 'hide' });
+    } catch {
+      return lockMouse();
+    }
+    // the mouse is captured only once the switch has settled, so the switch cannot knock the lock off and pause the game
+    // (a browser that never answers the request must not leave the mouse free either)
+    const settled = new Promise<void>((done) => setTimeout(done, 1200));
+    Promise.race([Promise.resolve(entered), settled])
+      .catch(() => {})
+      .then(() => {
+        lockMouse();
+        const turn = (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | undefined)?.lock?.('landscape');
+        turn?.catch(() => {}); // desktops and iOS refuse; that is fine
+      });
   }
 
   /** Persist progress. Refused mid-mission or while wanted so saves are always in a clean state. */

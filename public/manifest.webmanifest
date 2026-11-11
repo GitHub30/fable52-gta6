@@ -1,0 +1,10 @@
+{
+  "name": "VELA BAY — Open World",
+  "short_name": "VELA BAY",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#000000"
+}
