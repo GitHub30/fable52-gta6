@@ -21,6 +21,10 @@ interface Spec {
   paint: (p: Painter, w: number) => void;
   /** Volumes that stand proud of the wall, as [x0, x1, h0, h1, depth]; the painted frontage wraps around them. */
   boxes: (w: number) => [number, number, number, number, number][];
+  /** Paint once at this width and crop to each shop, instead of painting per width. */
+  fixed?: number;
+  /** Texture resolution, if not the default. */
+  ppm?: number;
 }
 
 /** Draws on the colour canvas and, in step, on the mask of what glows at night. */
@@ -28,14 +32,14 @@ class Painter {
   readonly c: CanvasRenderingContext2D;
   readonly m: CanvasRenderingContext2D;
   readonly rng: () => number;
-  constructor(readonly canvas: HTMLCanvasElement, readonly mask: HTMLCanvasElement, readonly H: number, seed: number) {
+  constructor(readonly canvas: HTMLCanvasElement, readonly mask: HTMLCanvasElement, readonly H: number, seed: number, readonly ppm = PPM) {
     this.c = canvas.getContext('2d')!;
     this.m = mask.getContext('2d')!;
     this.rng = mulberry32(seed);
     for (const ctx of [this.c, this.m]) {
-      ctx.setTransform(PPM, 0, 0, -PPM, 0, H * PPM); // metres, y up
+      ctx.setTransform(ppm, 0, 0, -ppm, 0, H * ppm); // metres, y up
       ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvas.width / PPM, H);
+      ctx.fillRect(0, 0, canvas.width / ppm, H);
     }
   }
   rect(x: number, h: number, w: number, d: number, color: string | CanvasGradient, glow = 0) {
@@ -57,15 +61,32 @@ class Painter {
     const c = this.c;
     c.save();
     c.translate(x, h);
-    c.scale(1 / PPM, -1 / PPM);
-    c.font = font.replace('#', String(size * PPM));
-    const sx = Math.min(1, (width * PPM) / c.measureText(str).width);
+    c.scale(1 / this.ppm, -1 / this.ppm);
+    c.font = font.replace('#', String(size * this.ppm));
+    const sx = Math.min(1, (width * this.ppm) / c.measureText(str).width);
     c.scale(sx, 1);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillStyle = color;
     c.fillText(str, 0, 0);
     c.restore();
+  }
+  /** Width in metres that `text` would give this string, unsqueezed. */
+  measure(str: string, size: number, font: string) {
+    this.c.save();
+    this.c.font = font.replace('#', String(size * this.ppm));
+    const w = this.c.measureText(str).width / this.ppm;
+    this.c.restore();
+    return w;
+  }
+  disc(x: number, h: number, r: number, color: string, glow = 0) {
+    const v = Math.round(glow * 255);
+    for (const [ctx, fill] of [[this.c, color], [this.m, `rgb(${v},${v},${v})`]] as [CanvasRenderingContext2D, string][]) {
+      ctx.beginPath();
+      ctx.arc(x, h, r, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
   }
   /** Path helper in metres for both canvases. */
   shape(points: [number, number][], color: string, glow = 0) {
@@ -152,10 +173,26 @@ function diningRoom(p: Painter, x0: number, x1: number, top: number) {
     p.shape([[x - 0.16, top - 0.92], [x + 0.17, top - 0.92], [x + 0.09, top - 0.75], [x - 0.08, top - 0.75]], '#ffe2a8', 1);
   }
 }
-/** Glazed shopfront with the lit sales floor behind it. `stripe` is the chain's safety band across the glass. */
-function glazing(p: Painter, x0: number, x1: number, top: number, stripe: string[], doorAt: number, frame = '#b9bdc2', cafe = false) {
+/** Bank or post-office lobby: a row of cash machines under a header band. */
+function lobby(p: Painter, x0: number, x1: number, top: number) {
+  const w = x1 - x0;
+  p.rect(x0, 0, w, top, p.grad(0, top, '#d9d6cf', '#f3f2ee'), 0.75);
+  p.rect(x0, top - 0.3, w, 0.3, '#fafaf7', 0.9);
+  for (let x = x0 + 0.3; x < x1 - 0.9; x += 1.5) p.rect(x, top - 0.16, 1.1, 0.06, '#ffffff', 1);
+  p.rect(x0, 0, w, 0.3, '#9c978c', 0.5);
+  p.rect(x0, 1.92, w, 0.2, '#ffffff', 0.9);
+  for (let x = x0 + 0.5; x < x1 - 0.9; x += 1.15) {
+    p.rect(x, 0.3, 0.8, 1.5, '#c9ccd0', 0.6);
+    p.rect(x + 0.1, 1.1, 0.6, 0.42, '#2a6fb5', 1);
+    p.rect(x + 0.1, 0.84, 0.6, 0.16, '#3a3d42', 0.4);
+    p.rect(x - 0.13, 0.3, 0.05, 1.72, '#e8e6e0', 0.6);
+  }
+}
+/** Glazed shopfront with the lit interior behind it. `stripe` is the chain's safety band across the glass. */
+function glazing(p: Painter, x0: number, x1: number, top: number, stripe: string[], doorAt: number, frame = '#b9bdc2', room: 'shop' | 'cafe' | 'bank' = 'shop') {
   const w = x1 - x0, rng = p.rng;
-  if (cafe) diningRoom(p, x0, x1, top);
+  if (room === 'cafe') diningRoom(p, x0, x1, top);
+  else if (room === 'bank') lobby(p, x0, x1, top);
   else salesFloor(p, x0, x1, top);
   // glass: sky reflection, falling to clear at eye level
   const sheen = p.c.createLinearGradient(0, top, 0, 0);
@@ -264,7 +301,7 @@ function convenience(fascia: (p: Painter, w: number) => void, wall: (p: Painter,
   };
 }
 
-const SPECS: Record<StoreKind, Spec> = {
+const SPECS: Record<string, Spec> = {
   famima: convenience(
     (p, w) => {
       p.rect(0, GLASS, w, 1.1, p.grad(GLASS, CONV_H, '#eef0f1', '#ffffff'), 1);
@@ -365,7 +402,7 @@ const SPECS: Record<StoreKind, Spec> = {
       // ground floor: glazing, then the timber McCafe panel at the right-hand end
       const cafe = Math.min(2.6, w * 0.24);
       p.rect(0, 0, w, canopy, '#3b3d40');
-      glazing(p, 0.25, w - cafe - 0.15, 2.75, ['#ffc72c'], Math.max(tx + tw + 1.3, (tx + tw + w - cafe) / 2), '#3d4044', true);
+      glazing(p, 0.25, w - cafe - 0.15, 2.75, ['#ffc72c'], Math.max(tx + tw + 1.3, (tx + tw + w - cafe) / 2), '#3d4044', 'cafe');
       p.rect(w - cafe, 0, cafe, canopy, '#5b3a2a');
       for (let h = 0; h < canopy; h += 0.16) p.rect(w - cafe, h, cafe, 0.012, 'rgba(0,0,0,0.3)');
       p.text('McCafé', w - cafe / 2, 1.9, 0.5, '#ffffff', `italic 700 #px Georgia, "Times New Roman", serif`, cafe - 0.4);
@@ -393,6 +430,116 @@ const SPECS: Record<StoreKind, Spec> = {
     },
   },
 };
+
+// ------------------------------------------------------------------ other chains: one sign system, a table of liveries
+type Room = 'shop' | 'cafe' | 'bank';
+interface Brand {
+  text: string;
+  sub?: string; // second, smaller line
+  bg: string; // fascia
+  fg: string; // lettering
+  accent?: string; // band along the foot of the fascia, and the safety stripe on the glass
+  mark?: [color: string, letter?: string, letterColor?: string]; // roundel before the name
+  font?: 'gothic' | 'mincho' | 'latin' | 'serif';
+  wall?: [tile: string, joint: string, w: number, h: number, brick?: boolean];
+  room?: Room;
+}
+const FONTS = {
+  gothic: `900 #px ${JP}`,
+  mincho: `700 #px "Yu Mincho","YuMincho","Hiragino Mincho ProN","MS PMincho",serif`,
+  latin: `900 #px ${SANS}`,
+  serif: `700 #px Georgia, "Times New Roman", serif`,
+};
+const SIGN_W = 10; // every branded frontage is painted this wide; narrower shops show its middle
+
+/**
+ * A shopfront in a chain's colours: lit fascia with the name, glazing with the right kind of interior, projecting sign.
+ * The name sits within the middle four metres, so the painting can be cropped to any shop width.
+ */
+function branded(b: Brand): Spec {
+  const font = FONTS[b.font ?? 'gothic'], accent = b.accent ?? b.fg;
+  const wall = b.wall ?? ['#d9d6cf', '#aaa69d', 0.3, 0.15];
+  return {
+    height: CONV_H,
+    maxWidth: SIGN_W,
+    fixed: SIGN_W,
+    ppm: 96,
+    paint: (p, w) => {
+      masonry(p, 0, 0, w, GLASS, wall[0], wall[1], wall[2], wall[3], wall[4]);
+      glazing(p, 0.45, w - 0.45, GLASS, [accent], w / 2, b.room === 'cafe' ? '#3d4044' : '#b9bdc2', b.room ?? 'shop');
+      // fascia
+      p.rect(0, GLASS, w, CONV_H - GLASS, b.bg, 1);
+      p.rect(0, GLASS + 0.05, w, 0.09, accent, 1);
+      for (let x = 2; x < w; x += 2) p.rect(x, GLASS, 0.012, CONV_H - GLASS, 'rgba(0,0,0,0.14)');
+      const size = b.sub ? 0.42 : 0.5, y = GLASS + (b.sub ? 0.7 : 0.62), room = b.mark ? 2.8 : 3.5;
+      const tw = Math.min(room, p.measure(b.text, size, font)), cx = w / 2 + (b.mark ? 0.32 : 0);
+      p.text(b.text, cx, y, size, b.fg, font, room);
+      if (b.sub) p.text(b.sub, cx, GLASS + 0.33, 0.15, b.fg, FONTS.gothic, room);
+      if (b.mark) {
+        const mx = cx - tw / 2 - 0.4;
+        p.disc(mx, y, 0.27, b.mark[0], 1);
+        if (b.mark[1]) p.text(b.mark[1], mx, y - 0.01, 0.34, b.mark[2] ?? '#ffffff', FONTS.gothic, 0.4);
+      }
+      p.shade(0, GLASS, w, 0.5);
+      // projecting sign
+      const bx = w + 0.15, top = CONV_H;
+      p.rect(bx, top - 1.3, 1.0, 1.3, b.bg, 1);
+      p.rect(bx, top - 1.3, 1.0, 0.07, accent, 1);
+      p.rect(bx, top - 0.07, 1.0, 0.07, accent, 1);
+      if (/^[\x20-\x7e]+$/.test(b.text)) {
+        const words = b.text.split(' ');
+        words.forEach((word, i) => p.text(word, bx + 0.5, top - 0.65 + ((words.length - 1) / 2 - i) * 0.3, 0.24, b.fg, font, 0.84));
+      } else {
+        const chars = [...b.text.replace('・', '')].slice(0, 7), s = Math.min(0.26, 1.08 / chars.length);
+        chars.forEach((ch, i) => p.text(ch, bx + 0.5, top - 0.65 + ((chars.length - 1) / 2 - i) * s * 1.05, s, b.fg, font, 0.8));
+      }
+    },
+    boxes: (w) => [[-0.05, w + 0.05, GLASS, CONV_H, 0.55]],
+  };
+}
+
+const WOOD: Brand['wall'] = ['#5b4332', '#3b2a1f', 0.9, 0.14];
+const DARK: Brand['wall'] = ['#3a3836', '#252423', 0.6, 0.3];
+const BRICK: Brand['wall'] = ['#a8623f', '#7c5a48', 0.22, 0.07, true];
+const BRANDS: Record<string, Brand> = {
+  // rice bowls, set meals, noodles
+  yoshinoya: { text: '吉野家', bg: '#f08200', fg: '#1a1a1a', accent: '#ffffff', mark: ['#ffffff', '牛', '#f08200'], room: 'cafe', wall: DARK },
+  matsuya: { text: '松屋', bg: '#ffd400', fg: '#1b3fa0', accent: '#e8380d', mark: ['#e8380d'], room: 'cafe' },
+  nakau: { text: 'なか卯', bg: '#ffffff', fg: '#c8102e', font: 'mincho', room: 'cafe', wall: WOOD },
+  yayoi: { text: 'やよい軒', bg: '#f6f1e6', fg: '#1a1a1a', accent: '#b5121b', font: 'mincho', room: 'cafe', wall: WOOD },
+  marugame: { text: '丸亀製麺', bg: '#3a2a1e', fg: '#ffffff', accent: '#b5121b', font: 'mincho', room: 'cafe', wall: WOOD },
+  ohsho: { text: '餃子の王将', bg: '#d7141a', fg: '#ffffff', accent: '#0a8a3a', room: 'cafe' },
+  osakaohsho: { text: '大阪王将', bg: '#ffd200', fg: '#d7141a', room: 'cafe' },
+  tenichi: { text: '天下一品', bg: '#d7141a', fg: '#ffffff', accent: '#1a1a1a', font: 'mincho', room: 'cafe' },
+  ippudo: { text: '一風堂', bg: '#f4efe4', fg: '#1a1a1a', accent: '#b5121b', mark: ['#b5121b'], font: 'mincho', room: 'cafe', wall: WOOD },
+  daruma: { text: '串かつだるま', sub: '新世界 元祖串かつ', bg: '#d7141a', fg: '#ffe100', font: 'mincho', room: 'cafe' },
+  donkey: { text: 'びっくりドンキー', bg: '#5a3a22', fg: '#ffd200', accent: '#c8102e', room: 'cafe', wall: WOOD },
+  mos: { text: 'MOS BURGER', bg: '#00703c', fg: '#ffffff', accent: '#d7141a', mark: ['#d7141a', 'M'], font: 'latin', room: 'cafe' },
+  daily: { text: 'Daily YAMAZAKI', bg: '#ffd400', fg: '#d7141a', font: 'latin' },
+  // cafes
+  starbucks: { text: 'STARBUCKS COFFEE', bg: '#1e3932', fg: '#ffffff', accent: '#00754a', mark: ['#00754a'], font: 'latin', room: 'cafe', wall: DARK },
+  doutor: { text: 'DOUTOR', sub: 'ドトールコーヒーショップ', bg: '#ffd200', fg: '#1a1a1a', font: 'latin', room: 'cafe' },
+  tullys: { text: "TULLY'S COFFEE", bg: '#3b2a20', fg: '#ffffff', accent: '#c8102e', font: 'serif', room: 'cafe', wall: WOOD },
+  stmarc: { text: 'ST-MARC CAFÉ', sub: 'サンマルクカフェ', bg: '#5b1f24', fg: '#f2d9a0', font: 'serif', room: 'cafe', wall: BRICK },
+  // supermarkets, discount and drug stores
+  tamade: { text: 'スーパー玉出', sub: '激安 ・ 24時間営業', bg: '#ffe100', fg: '#e60012' },
+  seijo: { text: '成城石井', sub: 'SEIJO ISHII', bg: '#6a1f2b', fg: '#ffffff', accent: '#c9a45a', font: 'mincho', wall: BRICK },
+  donki: { text: 'ドン・キホーテ', sub: '驚安の殿堂', bg: '#ffe100', fg: '#1a1a1a', accent: '#e60012' },
+  daiso: { text: 'DAISO', sub: 'ダイソー', bg: '#e4007f', fg: '#ffffff', font: 'latin' },
+  sugi: { text: 'スギ薬局', bg: '#ffffff', fg: '#e60012', mark: ['#e60012'] },
+  cocokara: { text: 'ココカラファイン', bg: '#ffffff', fg: '#e4007f', accent: '#00a0e9' },
+  matsukiyo: { text: 'マツモトキヨシ', sub: '薬 ・ 化粧品', bg: '#ffe100', fg: '#1a1a1a', accent: '#0068b7' },
+  kokumin: { text: 'コクミン', sub: 'KOKUMIN ドラッグ', bg: '#00913a', fg: '#ffffff', accent: '#ffe100' },
+  daikoku: { text: 'ダイコクドラッグ', bg: '#e60012', fg: '#ffe100' },
+  // banks and the post office
+  mufg: { text: '三菱UFJ銀行', sub: 'MUFG', bg: '#f2f2f2', fg: '#3a3a3a', accent: '#e60012', mark: ['#e60012'], room: 'bank' },
+  resona: { text: 'りそな銀行', bg: '#ffffff', fg: '#00a040', accent: '#f39800', mark: ['#00a040'], room: 'bank' },
+  mizuho: { text: 'みずほ銀行', sub: 'MIZUHO', bg: '#ffffff', fg: '#0f218b', accent: '#e60012', room: 'bank' },
+  smbc: { text: '三井住友銀行', sub: 'SMBC', bg: '#004831', fg: '#ffffff', accent: '#c4d700', room: 'bank' },
+  kansaimirai: { text: '関西みらい銀行', bg: '#ffffff', fg: '#00a040', accent: '#f39800', room: 'bank' },
+  post: { text: '郵便局', sub: 'ゆうちょ銀行 ・ ATM', bg: '#ffffff', fg: '#e60012', mark: ['#e60012', '〒'], room: 'bank' },
+};
+for (const [kind, brand] of Object.entries(BRANDS)) SPECS[kind] = branded(brand);
 
 // ------------------------------------------------------------------ geometry
 class Mesher {
@@ -440,21 +587,25 @@ export class Stores {
     const used = new Set<string>();
     const batches = new Map<string, { kind: StoreKind; width: number; mesh: Mesher }>();
     for (const s of data.stores) {
-      const site = this.fit(data, city, s.x, s.z, SPECS[s.kind], used);
+      const spec = SPECS[s.kind];
+      if (!spec) continue; // a chain baked into the data that this build cannot draw
+      const site = this.fit(data, city, s.x, s.z, spec, used);
       if (!site) continue;
-      const key = s.kind + site.width;
+      // one painting per chain where it can be cropped, otherwise one per chain and width
+      const width = spec.fixed ?? site.width, key = s.kind + (spec.fixed ? '' : site.width);
       let b = batches.get(key);
-      if (!b) batches.set(key, (b = { kind: s.kind, width: site.width, mesh: new Mesher() }));
-      this.frontage(b.mesh, SPECS[s.kind], site);
+      if (!b) batches.set(key, (b = { kind: s.kind, width, mesh: new Mesher() }));
+      this.frontage(b.mesh, spec, site, width);
       this.placed.push({ kind: s.kind, x: site.x + site.nx * 2, z: site.z + site.nz * 2, nx: site.nx, nz: site.nz, name: s.name });
     }
     let seed = 91;
     for (const b of batches.values()) {
       const spec = SPECS[b.kind];
       const canvas = document.createElement('canvas'), mask = document.createElement('canvas');
-      canvas.width = mask.width = Math.round((b.width + STRIP) * PPM);
-      canvas.height = mask.height = Math.round(spec.height * PPM);
-      spec.paint(new Painter(canvas, mask, spec.height, seed++), b.width);
+      const ppm = spec.ppm ?? PPM;
+      canvas.width = mask.width = Math.round((b.width + STRIP) * ppm);
+      canvas.height = mask.height = Math.round(spec.height * ppm);
+      spec.paint(new Painter(canvas, mask, spec.height, seed++, ppm), b.width);
       // night map = the painting, kept only where the mask says it is lit
       const m = mask.getContext('2d')!;
       m.setTransform(1, 0, 0, 1, 0, 0);
@@ -519,11 +670,12 @@ export class Stores {
   }
 
   /** Emit the frontage: the flat painted wall, the proud volumes wrapped in the same painting, and the projecting sign. */
-  private frontage(m: Mesher, spec: Spec, s: Site) {
-    const W = s.width, H = spec.height, TW = W + STRIP;
+  private frontage(m: Mesher, spec: Spec, s: Site, painted: number) {
+    const W = s.width, H = spec.height, TW = painted + STRIP;
+    const crop = (painted - W) / 2; // a narrower shop shows the middle of the painting
     const rx = s.nz, rz = -s.nx; // the viewer's right when facing the wall
     const P = (x: number, h: number, d: number) => [s.x + rx * (x - W / 2) + s.nx * d, s.y + h, s.z + rz * (x - W / 2) + s.nz * d];
-    const U = (x: number, h: number) => [x / TW, h / H];
+    const U = (x: number, h: number) => [(x + crop) / TW, h / H];
     const N = [s.nx, 0, s.nz], R = [rx, 0, rz], L = [-rx, 0, -rz];
     const e = 0.01;
     const box = (x0: number, x1: number, h0: number, h1: number, d0: number, d1: number, side?: [number, number], drop = 0) => {
@@ -541,6 +693,6 @@ export class Stores {
     m.quad([P(0, -1, 0.1), P(W, -1, 0.1), P(W, H, 0.1), P(0, H, 0.1)], N, [U(e, -1), U(W - e, -1), U(W - e, H - e), U(e, H - e)]);
     for (const [x0, x1, h0, h1, d] of spec.boxes(W)) box(x0, x1, h0 > 0 ? h0 : -1, h1, 0, d);
     // projecting sign above the fascia, double-sided, on the left-hand end
-    if (s.tall) box(0.25, 0.43, H + 0.5, H + 1.8, 0.15, 1.15, [W + 0.15, W + 1.15], 1.8);
+    if (s.tall) box(0.25, 0.43, H + 0.5, H + 1.8, 0.15, 1.15, [painted + 0.15 - crop, painted + 1.15 - crop], 1.8);
   }
 }

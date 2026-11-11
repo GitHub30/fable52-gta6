@@ -11,7 +11,8 @@ export interface Edge {
   pts: Float32Array; // x,z pairs
   len: number;
 }
-export type StoreKind = 'mcd' | 'seven' | 'famima' | 'lawson' | 'lawson100';
+/** Chain id as baked by tools/fetch_stores.py ('famima', 'yoshinoya', 'mufg', ...); Stores.ts holds the look of each. */
+export type StoreKind = string;
 export interface WorldData {
   hx: number;
   hz: number;
