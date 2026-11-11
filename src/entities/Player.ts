@@ -68,7 +68,7 @@ export class Player {
     this.pos.x = clamp(this.pos.x, -BOUND.x, BOUND.x);
     this.pos.z = clamp(this.pos.z, -BOUND.z, BOUND.z);
 
-    const ground = city.groundHeight(this.pos.x, this.pos.z);
+    const ground = city.floorHeight(this.pos.x, this.pos.z, this.pos.y);
     if (this.pos.y <= ground) {
       this.pos.y = ground;
       this.vel.y = 0;

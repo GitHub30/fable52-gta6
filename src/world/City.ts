@@ -4,6 +4,7 @@ import { CollisionWorld } from './Collision';
 import { WorldData, Edge, terrainHeight } from './WorldData';
 import { mergeBoxes, vertexColorMaterial, BoxPart } from '../core/geo';
 import { Stores } from './Stores';
+import { Footbridge } from './Footbridge';
 
 /** Named places (local metres: x east, z south) used for district names, missions and spawn points. */
 export const PLACES = {
@@ -148,6 +149,7 @@ export class City {
   readonly collision = new CollisionWorld();
   private facadeMats: THREE.MeshStandardMaterial[] = [];
   stores!: Stores;
+  footbridge!: Footbridge;
   private lampGlow!: THREE.MeshBasicMaterial;
   private lampBulb!: THREE.MeshStandardMaterial;
   private glows!: THREE.InstancedMesh;
@@ -413,6 +415,8 @@ export class City {
     this.buildTsutenkaku(H(T.x, T.z));
     this.stores = new Stores(data, this);
     this.group.add(this.stores.group);
+    this.footbridge = new Footbridge(this);
+    this.group.add(this.footbridge.group);
 
     // ---------- trees: mapped ones plus a scatter inside parks and temple grounds
     const treeSpots: { x: number; z: number; s: number }[] = [];
@@ -579,6 +583,7 @@ export class City {
   setNight(n: number) {
     for (const m of this.facadeMats) m.emissiveIntensity = n * 0.9;
     this.stores.setNight(n);
+    this.footbridge.setNight(n);
     this.lampBulb.emissiveIntensity = n * 2.5;
     this.lampGlow.opacity = n * 0.8;
     this.glows.visible = n > 0.02;
@@ -586,6 +591,10 @@ export class City {
 
   groundHeight(x: number, z: number) {
     return terrainHeight(this.data, x, z);
+  }
+  /** What someone on foot at height `y` stands on: the terrain, or a footbridge deck or stair within a step of their feet. */
+  floorHeight(x: number, z: number, y: number) {
+    return Math.max(terrainHeight(this.data, x, z), this.footbridge.height(x, z, y));
   }
 
   districtName(x: number, z: number) {
