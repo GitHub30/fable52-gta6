@@ -19,6 +19,7 @@ import { Wanted } from './systems/Wanted';
 import { Missions } from './systems/Missions';
 import { Save } from './systems/Save';
 import { Hud, Blip } from './ui/Hud';
+import { TouchControls } from './ui/Touch';
 import { BOUND, mulberry32, rand, clamp } from './config';
 
 /** Anything the player can fly: both classes expose the same controls-and-state interface. */
@@ -78,6 +79,7 @@ export class Game {
   readonly effects: Effects;
   readonly player = new Player();
   readonly hud: Hud;
+  readonly touch: TouchControls;
   readonly vehicles: Vehicle[] = [];
   readonly peds: Pedestrians;
   readonly traffic: Traffic;
@@ -134,6 +136,9 @@ export class Game {
     this.env = new Environment(this.scene);
     this.effects = new Effects(this.scene);
     this.hud = new Hud(uiRoot, this.city);
+    this.touch = new TouchControls(uiRoot, this.input, {
+      weapon: () => (this.weapon = WEAPON_KEYS[(WEAPON_KEYS.indexOf(this.weapon) + 1) % WEAPON_KEYS.length]),
+    });
     this.gfx = new Graphics(this.renderer, this.scene, this.camera, this.env, this.city);
     this.hud.graphics = { level: () => this.gfx.level, set: (l) => this.gfx.apply(l) };
     this.rig.groundAt = (x, z) => this.city.groundHeight(x, z);
@@ -388,6 +393,7 @@ export class Game {
       if (this.state === 'playing') this.pause();
       else if (this.state === 'paused') this.resume();
     }
+    this.touch.update(this.heli ? 'air' : this.player.vehicle ? 'car' : 'foot', this.state === 'playing');
     if (this.state === 'playing') this.step(dt);
     else if (this.state === 'menu') {
       this.rig.yaw += dt * 0.05;

@@ -81,3 +81,41 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 
 .credits { margin-top: 14px; font-size: 11px; opacity: 0.6; }
 .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; letter-spacing: 2px; background: #0b0d14; }
+
+/* ---- touch controls (see ui/Touch.ts): #ui gets .touch-on after the first touch */
+#game { touch-action: none; }
+.touch { position: absolute; inset: 0; pointer-events: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.t-move, .t-look { position: absolute; top: 0; bottom: 0; pointer-events: auto; touch-action: none; }
+.t-move { left: 0; width: 45%; }
+.t-look { left: 45%; right: 0; }
+.t-base { position: absolute; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 50%; background: rgba(255, 255, 255, 0.1); border: 2px solid rgba(255, 255, 255, 0.4); pointer-events: none; }
+.t-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: rgba(255, 255, 255, 0.55); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5); }
+.t-btn { position: absolute; pointer-events: auto; touch-action: none; width: 68px; height: 68px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.55); background: rgba(14, 16, 28, 0.5); color: #fff; font-size: 13px; font-weight: 700; line-height: 1.1; font-family: inherit; backdrop-filter: blur(3px); -webkit-tap-highlight-color: transparent; }
+.t-btn.on { background: rgba(255, 79, 160, 0.75); border-color: #fff; transform: scale(0.94); }
+/* right-hand cluster, laid out around the thumb; env() keeps clear of notches and the home bar */
+.t-fire { right: calc(22px + env(safe-area-inset-right)); bottom: calc(96px + env(safe-area-inset-bottom)); width: 84px; height: 84px; font-size: 15px; background: rgba(255, 79, 160, 0.4); }
+.t-a { right: calc(118px + env(safe-area-inset-right)); bottom: calc(40px + env(safe-area-inset-bottom)); }
+.t-b { right: calc(30px + env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); }
+.t-use { right: calc(124px + env(safe-area-inset-right)); bottom: calc(126px + env(safe-area-inset-bottom)); }
+.t-weapon, .t-horn { right: calc(34px + env(safe-area-inset-right)); bottom: calc(196px + env(safe-area-inset-bottom)); width: 56px; height: 56px; }
+.t-horn { font-size: 20px; }
+.t-pause { right: calc(12px + env(safe-area-inset-right)); top: calc(10px + env(safe-area-inset-top)); width: 44px; height: 44px; font-size: 16px; }
+/* the HUD moves out from under the thumbs */
+.touch-on .hud-bl { left: calc(10px + env(safe-area-inset-left)); top: 8px; bottom: auto; }
+.touch-on .minimap { width: 104px; height: 104px; border-width: 2px; }
+.touch-on .hud-bl .bar { width: 104px; margin-top: 5px; }
+.touch-on .district { font-size: 11px; }
+.touch-on .fps { display: none; }
+.touch-on .notes { left: calc(128px + env(safe-area-inset-left)); top: 8px; width: min(300px, 38vw); }
+.touch-on .note { font-size: 12px; padding: 6px 9px; }
+.touch-on .hud-tr { top: 8px; right: calc(68px + env(safe-area-inset-right)); }
+.touch-on .money { font-size: 22px; }
+.touch-on .stars { font-size: 18px; height: 24px; }
+.touch-on .clock { font-size: 13px; }
+.touch-on .hud-br { right: auto; left: 50%; transform: translateX(-50%); bottom: 6px; text-align: center; }
+.touch-on .hud-br .bar { margin: 4px auto 0; }
+.touch-on .speed { font-size: 30px; }
+.touch-on .prompt { bottom: 30%; font-size: 14px; }
+.touch-on .objective { font-size: 13px; padding: 6px 12px; max-width: 46vw; top: 8px; }
+.touch-on .card { padding: 18px 16px; }
+.touch-on .keys { grid-template-columns: 1fr; }

@@ -6,6 +6,9 @@ export class Input {
   mouseDY = 0;
   wheel = 0;
   locked = false;
+  /** Analogue stick of the touch controls, each axis -1..1 (x right, y forward). Adds to W A S D. */
+  stickX = 0;
+  stickY = 0;
   private dragging = false;
   onLockChange: (locked: boolean) => void = () => {};
 
@@ -59,7 +62,18 @@ export class Input {
     return this.pressed.has(code);
   }
   axis(neg: string, pos: string) {
-    return (this.down.has(pos) ? 1 : 0) - (this.down.has(neg) ? 1 : 0);
+    return this.amount(pos) - this.amount(neg);
+  }
+  /** How far a movement key is "pressed": 1 for the key itself, otherwise the stick's share in that direction. */
+  private amount(code: string) {
+    if (this.down.has(code)) return 1;
+    const v = code === 'KeyW' ? this.stickY : code === 'KeyS' ? -this.stickY : code === 'KeyD' ? this.stickX : code === 'KeyA' ? -this.stickX : 0;
+    return v > 0.12 ? v : 0; // dead zone
+  }
+  /** Camera movement from a touch drag, in the same units as mouse pixels. */
+  look(dx: number, dy: number) {
+    this.mouseDX += dx;
+    this.mouseDY += dy;
   }
   /** Call once at the end of every frame. */
   endFrame() {
@@ -68,7 +82,7 @@ export class Input {
     this.mouseDY = 0;
     this.wheel = 0;
   }
-  /** Test hook: simulate held keys. */
+  /** Hold or release a key from code: the touch buttons and tests. */
   setKey(code: string, isDown: boolean) {
     if (isDown) {
       if (!this.down.has(code)) this.pressed.add(code);

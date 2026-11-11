@@ -45,6 +45,7 @@ src/
     Save.ts            localStorage への保存・読込
   ui/
     Hud.ts / style.css DOM の HUD、メニュー、Canvas 2D の回転ミニマップ
+    Touch.ts           タッチ操作（左半分の移動スティック、右半分の視点ドラッグ、状況で変わるボタン）。Input にキー入力として流すだけなので、他のシステムはタッチを知らない
 ```
 
 ## 世界の座標系と地図データ
