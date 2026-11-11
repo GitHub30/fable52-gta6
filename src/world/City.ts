@@ -3,6 +3,7 @@ import { BOUND, mulberry32 } from '../config';
 import { CollisionWorld } from './Collision';
 import { WorldData, Edge, terrainHeight } from './WorldData';
 import { mergeBoxes, vertexColorMaterial, BoxPart } from '../core/geo';
+import { Stores } from './Stores';
 
 /** Named places (local metres: x east, z south) used for district names, missions and spawn points. */
 export const PLACES = {
@@ -146,6 +147,7 @@ export class City {
   readonly group = new THREE.Group();
   readonly collision = new CollisionWorld();
   private facadeMats: THREE.MeshStandardMaterial[] = [];
+  stores!: Stores;
   private lampGlow!: THREE.MeshBasicMaterial;
   private lampBulb!: THREE.MeshStandardMaterial;
   private glows!: THREE.InstancedMesh;
@@ -409,6 +411,8 @@ export class City {
     this.group.add(roofMesh);
 
     this.buildTsutenkaku(H(T.x, T.z));
+    this.stores = new Stores(data, this);
+    this.group.add(this.stores.group);
 
     // ---------- trees: mapped ones plus a scatter inside parks and temple grounds
     const treeSpots: { x: number; z: number; s: number }[] = [];
@@ -574,6 +578,7 @@ export class City {
   /** 0 (day) .. 1 (night): drives window and street-lamp emissives. */
   setNight(n: number) {
     for (const m of this.facadeMats) m.emissiveIntensity = n * 0.9;
+    this.stores.setNight(n);
     this.lampBulb.emissiveIntensity = n * 2.5;
     this.lampGlow.opacity = n * 0.8;
     this.glows.visible = n > 0.02;

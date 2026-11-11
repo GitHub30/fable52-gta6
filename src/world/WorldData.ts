@@ -11,6 +11,7 @@ export interface Edge {
   pts: Float32Array; // x,z pairs
   len: number;
 }
+export type StoreKind = 'mcd' | 'seven' | 'famima' | 'lawson' | 'lawson100';
 export interface WorldData {
   hx: number;
   hz: number;
@@ -25,6 +26,8 @@ export interface WorldData {
   buildings: { h: number; pts: Float32Array }[];
   green: Float32Array[];
   trees: Float32Array;
+  /** Chain stores at their mapped positions (see tools/fetch_stores.py). */
+  stores: { kind: StoreKind; x: number; z: number; name: string }[];
   ground: HTMLImageElement;
   far: HTMLImageElement;
 }
@@ -41,6 +44,8 @@ function image(name: string) {
 }
 
 export async function loadWorld(): Promise<WorldData> {
+  // optional: a map baked without it simply has no chain stores
+  const storesRaw: any[] = await fetch(url('stores.json')).then((r) => (r.ok ? r.json() : [])).catch(() => []);
   const [raw, demBuf, ground, far] = await Promise.all([
     fetch(url('map.json')).then((r) => r.json()),
     fetch(url('dem.bin')).then((r) => r.arrayBuffer()),
@@ -65,6 +70,7 @@ export async function loadWorld(): Promise<WorldData> {
     buildings: raw.buildings.map((b: any[]) => ({ h: b[0] / 10, pts: dm(b[1]) })),
     green: raw.green.map(dm),
     trees: dm(raw.trees),
+    stores: storesRaw.map((s) => ({ kind: s[0], x: s[1], z: s[2], name: s[3] })),
     ground, far,
   };
 }
