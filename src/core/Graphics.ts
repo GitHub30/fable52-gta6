@@ -3,6 +3,8 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { SunShadows } from './Shadows';
 import { setModelDetail, ModelDetail } from './geo';
 import type { Environment } from '../world/Environment';
 import type { City } from '../world/City';
@@ -14,15 +16,40 @@ export const GRAPHICS_LABEL: Record<GraphicsLevel, string> = { low: 'ローポ�
 interface Preset {
   detail: ModelDetail; // model tessellation (see geo.ts)
   pixelRatio: number; // upper bound; the display's own ratio still caps it
-  shadow: number; // sun shadow map size
+  shadow: number; // sun shadow map size (per cascade when there are cascades)
+  cascades: number[] | null; // far edge of each shadow cascade in metres; null = one map around the player
   post: boolean; // HDR pipeline: MSAA + bloom
+  ao: number; // ambient occlusion resolution scale, 0 = off (needs post)
   reflections: boolean; // sky reflected in paint and metal
 }
 const PRESETS: Record<GraphicsLevel, Preset> = {
-  low: { detail: 0, pixelRatio: 1, shadow: 1024, post: false, reflections: false },
-  high: { detail: 1, pixelRatio: 1.25, shadow: 2048, post: true, reflections: true },
-  ultra: { detail: 2, pixelRatio: 2, shadow: 4096, post: true, reflections: true },
+  low: { detail: 0, pixelRatio: 1, shadow: 1024, cascades: null, post: false, ao: 0, reflections: false },
+  high: { detail: 1, pixelRatio: 1.25, shadow: 2048, cascades: [22, 80, 280], post: true, ao: 0.5, reflections: true },
+  ultra: { detail: 2, pixelRatio: 2, shadow: 2048, cascades: [16, 52, 170, 520], post: true, ao: 1, reflections: true },
 };
+
+/**
+ * Ambient occlusion: darkens creases and contact lines (under cars, where walls meet the pavement) that the
+ * single hemisphere light leaves flat. It reads the depth the scene pass has already written instead of drawing
+ * the scene a second time, and can run below the frame's resolution.
+ */
+class AoPass extends GTAOPass {
+  constructor(scene: THREE.Scene, camera: THREE.Camera, private resolution: number) {
+    // a placeholder depth texture tells the pass not to render its own depth and normals
+    super(scene, camera, 1, 1, { depthTexture: new THREE.DepthTexture(1, 1) });
+    this.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1, thickness: 1, scale: 1.8, samples: resolution < 1 ? 8 : 16 });
+    this.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
+  }
+  override setSize(w: number, h: number) {
+    super.setSize(Math.max(1, Math.round(w * this.resolution)), Math.max(1, Math.round(h * this.resolution)));
+  }
+  override render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget, dt: number, mask: boolean) {
+    const depth = readBuffer.depthTexture;
+    this.gtaoMaterial.uniforms.tDepth.value = depth;
+    this.pdMaterial.uniforms.tDepth.value = depth;
+    super.render(renderer, writeBuffer, readBuffer, dt, mask);
+  }
+}
 /** Resolution scale steps used when the frame rate cannot be held. */
 const SCALE_STEPS = [1, 0.85, 0.7, 0.55];
 const KEY = 'velabay.graphics'; // the game's former name: kept so existing settings survive the rename
@@ -34,6 +61,7 @@ export class Graphics {
   private w = 1;
   private h = 1;
   private composer: EffectComposer | null = null;
+  private shadows: SunShadows | null = null;
   private pmrem: THREE.PMREMGenerator | null = null;
   private envScene: THREE.Scene | null = null;
   private envTarget: THREE.WebGLRenderTarget | null = null;
@@ -42,7 +70,7 @@ export class Graphics {
   constructor(
     private renderer: THREE.WebGLRenderer,
     private scene: THREE.Scene,
-    private camera: THREE.Camera,
+    private camera: THREE.PerspectiveCamera,
     private env: Environment,
     private city: City,
   ) {
@@ -83,16 +111,22 @@ export class Graphics {
       shadow.map = null as any;
     }
 
-    if (p.post && !this.composer) {
-      const target = new THREE.WebGLRenderTarget(this.w, this.h, { type: THREE.HalfFloatType, samples: 4 });
+    this.shadows?.dispose();
+    this.shadows = p.cascades ? new SunShadows(this.scene, this.camera, this.env.sun, p.cascades, p.shadow) : null;
+
+    if (this.composer) {
+      for (const pass of this.composer.passes) pass.dispose();
+      this.composer.dispose();
+      this.composer = null;
+    }
+    if (p.post) {
+      const target = new THREE.WebGLRenderTarget(this.w, this.h, { type: THREE.HalfFloatType, samples: 4, depthTexture: p.ao ? new THREE.DepthTexture(this.w, this.h) : null });
       const c = (this.composer = new EffectComposer(this.renderer, target));
       c.addPass(new RenderPass(this.scene, this.camera));
+      if (p.ao) c.addPass(new AoPass(this.scene, this.camera, p.ao));
       // lamps, beacons and the sun bloom; sunlit paint stays just under the threshold
       c.addPass(new UnrealBloomPass(new THREE.Vector2(this.w, this.h), 0.32, 0.55, 1.0));
       c.addPass(new OutputPass());
-    } else if (!p.post && this.composer) {
-      this.composer.dispose();
-      this.composer = null;
     }
 
     if (!p.reflections) {
@@ -142,6 +176,7 @@ export class Graphics {
 
   render(dt: number) {
     this.updateReflections(dt);
+    this.shadows?.update();
     if (this.composer) this.composer.render(dt);
     else this.renderer.render(this.scene, this.camera);
   }
