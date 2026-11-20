@@ -90,3 +90,5 @@ Python 3 と `requests` `numpy` `Pillow` が必要です。ダウンロードし
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 開発計画
 - [docs/SPRINT_LOG.md](docs/SPRINT_LOG.md) — スプリントごとの進捗と検証結果
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — システム構成と設計方針
+- [docs/FLOWCHART.md](docs/FLOWCHART.md) — 起動・メインループ・手配度とミッション・地図データ生成のフローチャート
+- [docs/ANALYSIS.md](docs/ANALYSIS.md) — 実用性の分析（遊びやすさ・配信と性能・保守性・権利面）

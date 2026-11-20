@@ -85,6 +85,8 @@ src/
 3. 描画
 4. `Input.endFrame()`
 
+処理の流れは [FLOWCHART.md](FLOWCHART.md) に図がある。
+
 `dt` は 0.05 秒で上限をかける。`Game.debugStep(frames)` で同じ `frame()` を任意回数回せる（自動テスト用）。
 
 ## 設計方針
